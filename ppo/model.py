@@ -4,8 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import gym
 
-from a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian
-from a2c_ppo_acktr.utils import init
+from ppo.distributions import Bernoulli, Categorical, DiagGaussian
+from ppo.utils import init
 
 
 class Flatten(nn.Module):

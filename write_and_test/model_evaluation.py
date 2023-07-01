@@ -4,9 +4,9 @@ import torch
 import sys
 sys.path.insert(0, '..')
 from evaluation import evaluate
-from a2c_ppo_acktr.model import Policy
-from a2c_ppo_acktr import utils
-from a2c_ppo_acktr.envs import make_vec_envs
+from ppo.model import Policy
+from ppo import utils
+from ppo.envs import make_vec_envs
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA

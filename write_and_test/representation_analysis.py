@@ -15,9 +15,9 @@ import proplot as pplt
 
 import sys
 sys.path.append('..')
-from a2c_ppo_acktr.model import Policy
-from a2c_ppo_acktr import utils
-from a2c_ppo_acktr.envs import make_vec_envs
+from ppo.model import Policy
+from ppo import utils
+from ppo.envs import make_vec_envs
 
 WINDOW_SIZE = (300, 300)
 

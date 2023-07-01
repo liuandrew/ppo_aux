@@ -1,14 +1,15 @@
 import numpy as np
 import torch
 
-from a2c_ppo_acktr import utils
-from a2c_ppo_acktr.envs import make_vec_envs
+from ppo import utils
+from ppo.envs import make_vec_envs
 
 
-def evaluate(actor_critic, obs_rms, env_name, seed, num_processes, eval_log_dir,
-             device, ret_info=1, capture_video=False, env_kwargs={}, data_callback=None,
+def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', seed=None, num_processes=1,
+             device=torch.device('cpu'), ret_info=1, capture_video=False, env_kwargs={}, data_callback=None,
              num_episodes=10, verbose=0, with_activations=False, deterministic=True,
-             normalize=True, aux_wrapper_kwargs={}, new_aux=False, auxiliary_truth_sizes=[]):
+             aux_wrapper_kwargs={}, auxiliary_truth_sizes=[],
+             eval_log_dir=None):
     '''
     ret_info: level of info that should be tracked and returned
     capture_video: whether video should be captured for episodes
@@ -30,13 +31,16 @@ def evaluate(actor_critic, obs_rms, env_name, seed, num_processes, eval_log_dir,
         see below at example_data_callback in this file for an example
     '''
 
-    eval_envs = make_vec_envs(env_name, seed + num_processes, num_processes,
+    if seed is None:
+        seed = np.random.randint(0, 1e9)
+
+    envs = make_vec_envs(env_name, seed + num_processes, num_processes,
                               None, eval_log_dir, device, True, 
                               capture_video=capture_video, 
                               env_kwargs=env_kwargs, normalize=normalize,
                               **aux_wrapper_kwargs)
 
-    vec_norm = utils.get_vec_normalize(eval_envs)
+    vec_norm = utils.get_vec_normalize(envs)
     if vec_norm is not None:
         vec_norm.eval()
         vec_norm.obs_rms = obs_rms
@@ -46,7 +50,7 @@ def evaluate(actor_critic, obs_rms, env_name, seed, num_processes, eval_log_dir,
     all_obs = []
     all_actions = []
     all_rewards = []
-    all_hidden_states = []
+    all_rnn_hxs = []
     all_dones = []
     all_masks = []
     all_activations = []
@@ -55,56 +59,70 @@ def evaluate(actor_critic, obs_rms, env_name, seed, num_processes, eval_log_dir,
     all_auxiliary_preds = []
     all_auxiliary_truths = []
     data = {}
+    
+    ep_obs = []
+    ep_actions = []
+    ep_rewards = []
+    ep_rnn_hxs = []
+    ep_dones = []
+    ep_values = []
+    ep_masks = []
+    ep_actor_features = []
+    
+    ep_auxiliary_preds = []
+    ep_activations = []
+    ep_auxiliary_truths = []
+    
 
-    obs = eval_envs.reset()
-    eval_recurrent_hidden_states = torch.zeros(
+    obs = envs.reset()
+    rnn_hxs = torch.zeros(
         num_processes, actor_critic.recurrent_hidden_state_size, device=device)
-    eval_masks = torch.zeros(num_processes, 1, device=device)
+    masks = torch.zeros(num_processes, 1, device=device)
 
-    while len(eval_episode_rewards) < num_episodes:
-        with torch.no_grad():
-            # _, action, _, eval_recurrent_hidden_states, _ = actor_critic.act(
-            #     obs,
-            #     eval_recurrent_hidden_states,
-            #     eval_masks,
-            #     deterministic=True)
+    for i in range(num_episodes):
+        step = 0
+        
+        while True:
+            ep_obs.append(obs)
+            ep_rnn_hxs.append(rnn_hxs)
+            if data_callback is not None and step == 0:
+                data = data_callback(None, envs, rnn_hxs,
+                    obs, [], [], [False], data, first=True)
+
+        
+        
+            with torch.no_grad():
+                outputs = actor_critic.act(obs, rnn_hxs, 
+                                        masks, deterministic=deterministic,
+                                        with_activations=with_activations)
+                action = outputs['action']
+                rnn_hxs = outputs['rnn_hxs']
+            obs, reward, done, infos = envs.step(action)
             
-            outputs = actor_critic.act(obs, eval_recurrent_hidden_states, 
-                                       eval_masks, deterministic=deterministic,
-                                       with_activations=with_activations)
-            action = outputs['action']
-            eval_recurrent_hidden_states = outputs['rnn_hxs']
+            masks = torch.tensor(
+                [[0.0] if done_ else [1.0] for done_ in done],
+                dtype=torch.float32,
+                device=device)
             
-        # Obser reward and next obs
-        obs, reward, done, infos = eval_envs.step(action)
-        
-        eval_masks = torch.tensor(
-            [[0.0] if done_ else [1.0] for done_ in done],
-            dtype=torch.float32,
-            device=device)
+            ep_actions.append(action)
+            ep_rewards.append(reward)
+            ep_dones.append(done)
+            ep_values.append(outputs['value'])
+            ep_masks.append(masks)
+            ep_actor_features.append(outputs['actor_features'])
+            
+            if 'auxiliary_preds' in outputs:
+                ep_auxiliary_preds.append(outputs['auxiliary_preds'])
+            
+            if with_activations:
+                ep_activations.append(outputs['activations'])
 
-        all_obs.append(obs)
-        all_actions.append(action)
-        all_rewards.append(reward)
-        all_hidden_states.append(eval_recurrent_hidden_states)
-        all_dones.append(done)
-        all_masks.append(eval_masks)
-        all_values.append(outputs['value'])
-        all_actor_features.append(outputs['actor_features'])
-        
-        if 'auxiliary_preds' in outputs:
-            all_auxiliary_preds.append(outputs['auxiliary_preds'])
-        
-        
-        if with_activations:
-            all_activations.append(outputs['activations'])
-
-        if data_callback is not None:
-            data = data_callback(actor_critic, eval_envs, eval_recurrent_hidden_states,
-                obs, action, reward, done, data)
-        else:
-            data = {}
-        if new_aux:
+            if data_callback is not None:
+                data = data_callback(None, envs, rnn_hxs,
+                    obs, action, reward, done, data)
+            else:
+                data = {}
+                
             auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
             for info in infos:
                 if 'auxiliary' in info and len(info['auxiliary']) > 0:
@@ -112,31 +130,55 @@ def evaluate(actor_critic, obs_rms, env_name, seed, num_processes, eval_log_dir,
                         auxiliary_truths[i].append(aux)
             if len(auxiliary_truths) > 0:
                 auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
+            ep_auxiliary_truths.append(auxiliary_truths)
+            
+            
+            # for info in infos:
+            #     if 'episode' in info.keys():
+            #         eval_episode_rewards.append(info['episode']['r'])
+            #         #Andy: add verbosity option
+            #         if verbose >= 2:
+            #             print('ep ' + str(len(eval_episode_rewards)) + ' rew ' + \
+            #                 str(info['episode']['r']))
+            
+            if done[0]:
+                all_obs.append(np.vstack(ep_obs))
+                all_actions.append(np.vstack(ep_actions))
+                all_rewards.append(np.vstack(ep_rewards))
+                all_rnn_hxs.append(np.vstack(ep_rnn_hxs))
+                all_dones.append(np.vstack(ep_dones))
+                all_masks.append(np.vstack(ep_masks))
+                all_values.append(np.vstack(ep_values))
+                all_actor_features.append(np.vstack(ep_actor_features))
+                
+                all_auxiliary_preds.append(ep_auxiliary_preds)
+                all_activations.append(ep_activations)
+                all_auxiliary_truths.append(ep_auxiliary_truths)
 
-        else:
-            auxiliary_truths = []
-            for info in infos:
-                if 'auxiliary' in info:
-                        if len(info['auxiliary'] > 0):
-                            auxiliary_truths.append(info['auxiliary'])
-                        
-            if len(auxiliary_truths) > 0:
-                auxiliary_truths = torch.tensor(np.vstack(auxiliary_truths))
-            else:
-                auxiliary_truths = None
-        
-        all_auxiliary_truths.append(auxiliary_truths)
-        
-        for info in infos:
-            if 'episode' in info.keys():
-                eval_episode_rewards.append(info['episode']['r'])
-                #Andy: add verbosity option
+                if data_callback is not None:
+                    data = data_callback(None, envs, rnn_hxs,
+                        obs, action, reward, done, data, stack=True)
+                          
                 if verbose >= 2:
-                    print('ep ' + str(len(eval_episode_rewards)) + ' rew ' + \
-                        str(info['episode']['r']))
-                        
+                    print(f'ep {i}, rew {np.sum(ep_rewards)}' )
+                    
+                ep_obs = []
+                ep_actions = []
+                ep_rewards = []
+                ep_rnn_hxs = []
+                ep_dones = []
+                ep_values = []
+                ep_masks = []
+                ep_actor_features = []
+                
+                ep_auxiliary_preds = []
+                ep_activations = []
+                ep_auxiliary_truths = []
+                
+                break
+  
 
-    # eval_envs.close()
+    envs.close()
     if verbose >= 1:
         print(" Evaluation using {} episodes: mean reward {:.5f}\n".format(
             len(eval_episode_rewards), np.mean(eval_episode_rewards)))
@@ -145,10 +187,10 @@ def evaluate(actor_critic, obs_rms, env_name, seed, num_processes, eval_log_dir,
         'obs': all_obs,
         'actions': all_actions,
         'rewards': all_rewards,
-        'hidden_states': all_hidden_states,
+        'rnn_hxs': all_rnn_hxs,
         'dones': all_dones,
         'masks': all_masks,
-        'envs': eval_envs,
+        'envs': envs,
         'data': data,
         'activations': all_activations,
         'values': all_values,
@@ -160,3 +202,72 @@ def evaluate(actor_critic, obs_rms, env_name, seed, num_processes, eval_log_dir,
 
 def example_data_callback(actor_critic, vec_envs, recurrent_hidden_states, data):
     pass
+
+
+
+def nav_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stack=False,
+                      first=False):
+    '''
+    Add navigation data pos and angle to data object
+    If stack is True, this function will handle stacking the data properly
+    '''    
+    if 'pos' not in data:
+        data['pos'] = []
+    if 'angle' not in data:
+        data['angle'] = []
+    if 'ep_pos' not in data:
+        data['ep_pos'] = []
+    if 'ep_angle' not in data:
+        data['ep_angle'] = []
+
+    if stack:
+        data['pos'].append(np.vstack(data['ep_pos']))
+        data['angle'].append(np.vstack(data['ep_angle']))
+        
+        data['ep_pos'] = []
+        data['ep_angle'] = []        
+    elif not done[0]:
+        pos = env.get_attr('character')[0].pos.copy()
+        angle = env.get_attr('character')[0].angle
+        data['ep_pos'].append(pos)
+        data['ep_angle'].append(angle)
+    
+    return data
+
+
+def explore_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stack=False,
+                      first=False):
+    '''
+    Add navigation data pos and angle and position of platform to data
+    '''
+    if 'pos' not in data:
+        data['pos'] = []
+    if 'angle' not in data:
+        data['angle'] = []
+    if 'goal' not in data:
+        data['goal'] = []
+    if 'ep_pos' not in data:
+        data['ep_pos'] = []
+    if 'ep_angle' not in data:
+        data['ep_angle'] = []
+    if 'ep_goal' not in data:
+        data['ep_goal'] = []
+
+    if first:
+        data['ep_goal'].append(env.envs[0].boxes[-1].corner)
+
+    if stack:
+        data['pos'].append(np.vstack(data['ep_pos']))
+        data['angle'].append(np.vstack(data['ep_angle']))
+        data['goal'].append(data['ep_goal'])
+        
+        data['ep_pos'] = []
+        data['ep_angle'] = []        
+        data['ep_goal'] = []
+    elif not done[0]:
+        pos = env.get_attr('character')[0].pos.copy()
+        angle = env.get_attr('character')[0].angle
+        data['ep_pos'].append(pos)
+        data['ep_angle'].append(angle)
+    
+    return data

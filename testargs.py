@@ -1,9 +1,19 @@
-from a2c_ppo_acktr.arguments import get_args
+from ppo.arguments import get_args
 from scheduler import convert_config_to_command
-from a2c_ppo_acktr.algo.ppo import PPOAux
-from a2c_ppo_acktr.model import Policy
-from a2c_ppo_acktr.envs import make_vec_envs
+from ppo.algo.ppo import PPOAux
+from ppo.model import Policy
+from ppo.envs import make_vec_envs
 import torch
+
+'''
+How to use:
+use convert_config_to_command from scheduler.py to convert an experiment config to a command
+copy the flags from that string and run "testargs.py <flags>"
+If wanting to see what the values of args are, you can run
+    ipython
+    %run testargs.py <flags>
+and then explore arg values
+'''
 
 args = get_args()
 print(args)

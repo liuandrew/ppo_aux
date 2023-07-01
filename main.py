@@ -14,13 +14,13 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-from a2c_ppo_acktr import algo, utils
-from a2c_ppo_acktr.algo.ppo import PPOAux
-from a2c_ppo_acktr.algo import gail
-from a2c_ppo_acktr.arguments import get_args
-from a2c_ppo_acktr.envs import make_vec_envs
-from a2c_ppo_acktr.model import Policy
-from a2c_ppo_acktr.storage import RolloutStorage, RolloutStorageAux
+from ppo import algo, utils
+from ppo.algo.ppo import PPOAux
+from ppo.algo import gail
+from ppo.arguments import get_args
+from ppo.envs import make_vec_envs
+from ppo.model import Policy
+from ppo.storage import RolloutStorage, RolloutStorageAux
 from evaluation import evaluate
 
 from scheduler import write_latest_exp_complete
@@ -53,60 +53,6 @@ def main():
     else:
         writer = SummaryWriter(f"runs/{run_name}")
 
-    #Setup video uploading
-    vid_dir = 'video'
-
-    for f in os.listdir(vid_dir):
-        os.remove(os.path.join(vid_dir, f))
-
-
-    # def file_available(f):
-    #     if os.path.exists(f):
-    #         try:
-    #             os.rename(f, f)
-    #             return True
-    #         except OSError as e:
-    #             return False
-
-    def available_videos():
-        vid_dir = 'video'
-        unuploaded_vids = []
-        idxs = []
-        for f in os.listdir(vid_dir):
-            if '.mp4' in f and f not in logged_videos:
-                unuploaded_vids.append(f)
-
-        if len(unuploaded_vids) > 1:
-            for f in unuploaded_vids:
-                idxs.append(int(f.split('.mp4')[0].split('-')[-1]))
-            f = unuploaded_vids[np.argmin(idxs)]
-            return os.path.join(vid_dir, f), f
-        else:
-            return False
-
-    def upload_videos():
-        available = available_videos()
-        if args.upload_video:
-            if available is not False:
-                path = available[0]
-                f = available[1]
-                wandb.log({'video': wandb.Video(path),
-                    'format': 'gif'})
-                logged_videos.append(f)
-        else:
-            save_path = 'saved_video/' + args.exp_name
-            #move videos to another folder
-            if len(logged_videos) == 0 and args.exp_name not in os.listdir('saved_video'):
-                os.mkdir(save_path)
-            if available is not False:
-                path = available[0]
-                f = available[1]
-                copyfile(path, os.path.join(save_path, f))
-                logged_videos.append(f)
-
-
-
-    logged_videos = []
     writer.add_text(
         "hyperparameters",
         "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in vars(args).items()])),
@@ -128,11 +74,17 @@ def main():
     if args.use_new_aux == True:
         print('New Auxiliary training methods')
         print('auxiliary truth sizes: ' + str(args.auxiliary_truth_sizes))
-        print('auxiliary heads: ' + str(args.nn_base_kwargs['auxiliary_heads']))
-        if len(args.auxiliary_truth_sizes) != len(args.nn_base_kwargs['auxiliary_heads']):
-            raise Exception('number of auxiliary_truth_sizes should be equivalent to number of auxiliary heads')
-        if args.nn_base != 'FlexBaseAux':
-            print('WARNING: nn_base should probably be FlexBaseAux for new aux methods')
+        
+        if 'auxiliary_heads' in args.nn_base_kwargs:
+            print('auxiliary heads: ' + str(args.nn_base_kwargs['auxiliary_heads']))
+            if len(args.auxiliary_truth_sizes) != len(args.nn_base_kwargs['auxiliary_heads']):
+                raise Exception(f'number of auxiliary_truth_sizes {len(args.auxiliary_truth_sizes)} should be equivalent to number of auxiliary heads')
+        else:
+            if len(args.auxiliary_truth_sizes) > 0:
+                raise Exception(f'number of auxiliary_truth_sizes {len(args.auxiliary_truth_sizes)} should be equivalent to number of auxiliary heads - no auxiliary heads given')
+
+    if args.nn_base != 'FlexBaseAux':
+        print('WARNING: nn_base should probably be FlexBaseAux for new aux methods')
 
     # Andy: generate save path ahead of time
     if args.save_subdir is not None:
@@ -235,7 +187,6 @@ def main():
             alpha=args.alpha,
             max_grad_norm=args.max_grad_norm)
     elif args.algo == 'ppo':
-        if args.use_new_aux:
             agent = PPOAux(
                 actor_critic,
                 args.clip_param,
@@ -247,54 +198,13 @@ def main():
                 lr=args.lr,
                 eps=args.eps,
                 max_grad_norm=args.max_grad_norm,
-                remove_actor_grads_on_shared=args.remove_actor_grads_on_shared)   
-        else:
-            agent = algo.PPO(
-                actor_critic,
-                args.clip_param,
-                args.ppo_epoch,
-                args.num_mini_batch,
-                args.value_loss_coef,
-                args.entropy_coef,
-                args.auxiliary_loss_coef,
-                lr=args.lr,
-                eps=args.eps,
-                max_grad_norm=args.max_grad_norm,
                 remove_actor_grads_on_shared=args.remove_actor_grads_on_shared)
-    elif args.algo == 'acktr':
-        agent = algo.A2C_ACKTR(
-            actor_critic, args.value_loss_coef, args.entropy_coef, acktr=True)
-
-    if args.gail:
-        assert len(envs.observation_space.shape) == 1
-        discr = gail.Discriminator(
-            envs.observation_space.shape[0] + envs.action_space.shape[0], 100,
-            device)
-        file_name = os.path.join(
-            args.gail_experts_dir, "trajs_{}.pt".format(
-                args.env_name.split('-')[0].lower()))
-        
-        expert_dataset = gail.ExpertDataset(
-            file_name, num_trajectories=4, subsample_frequency=20)
-        drop_last = len(expert_dataset) > args.gail_batch_size
-        gail_train_loader = torch.utils.data.DataLoader(
-            dataset=expert_dataset,
-            batch_size=args.gail_batch_size,
-            shuffle=True,
-            drop_last=drop_last)
-
-    print('initializing storage')
-    if args.use_new_aux:
-        rollouts = RolloutStorageAux(args.num_steps, args.num_processes,
-                                envs.observation_space.shape, envs.action_space,
-                                actor_critic.recurrent_hidden_state_size,
-                                actor_critic.auxiliary_output_sizes, #note sizes not size here
-                                auxiliary_truth_sizes=args.auxiliary_truth_sizes)
-    else:
-        rollouts = RolloutStorage(args.num_steps, args.num_processes,
-                                envs.observation_space.shape, envs.action_space,
-                                actor_critic.recurrent_hidden_state_size,
-                                actor_critic.auxiliary_output_size)
+              
+    rollouts = RolloutStorageAux(args.num_steps, args.num_processes,
+                            envs.observation_space.shape, envs.action_space,
+                            actor_critic.recurrent_hidden_state_size,
+                            actor_critic.auxiliary_output_sizes, #note sizes not size here
+                            auxiliary_truth_sizes=args.auxiliary_truth_sizes)
 
     obs = envs.reset()
     rollouts.obs[0].copy_(obs)
@@ -345,29 +255,13 @@ def main():
             # obs, reward, done, infos = envs.step(action)
             obs, reward, done, infos = envs.step(action)
             
-            if args.use_new_aux:
-                # !! New auxiliary code separating out auxiliary tasks into list
-                # Note that we will have an error "list index out of range" if 
-                #  there is a mismatch between number of truths and preds
-                auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
-                for info in infos:
-                    if 'auxiliary' in info and len(info['auxiliary']) > 0:
-                        for i, aux in enumerate(info['auxiliary']):
-                            auxiliary_truths[i].append(aux)
-                if len(auxiliary_truths) > 0:
-                    auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
-
-            else:
-                # !! Old auxiliary code needed to run old training model
-                auxiliary_truths = []
-                for info in infos:
-                    if 'auxiliary' in info:
-                        if len(info['auxiliary'] > 0):
-                            auxiliary_truths.append(info['auxiliary'])
-                if len(auxiliary_truths) > 0:
-                    auxiliary_truths = torch.tensor(np.vstack(auxiliary_truths))
-                else:
-                    auxiliary_truths = None
+            auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
+            for info in infos:
+                if 'auxiliary' in info and len(info['auxiliary']) > 0:
+                    for i, aux in enumerate(info['auxiliary']):
+                        auxiliary_truths[i].append(aux)
+            if len(auxiliary_truths) > 0:
+                auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
             
             for info in infos:
                 if 'episode' in info.keys():
@@ -397,29 +291,12 @@ def main():
                 rollouts.obs[-1], rollouts.recurrent_hidden_states[-1],
                 rollouts.masks[-1]).detach()
 
-        if args.gail:
-            if j >= 10:
-                envs.venv.eval()
-
-            gail_epoch = args.gail_epoch
-            if j < 10:
-                gail_epoch = 100  # Warm up
-            for _ in range(gail_epoch):
-                discr.update(gail_train_loader, rollouts,
-                             utils.get_vec_normalize(envs)._obfilt)
-
-            for step in range(args.num_steps):
-                rollouts.rewards[step] = discr.predict_reward(
-                    rollouts.obs[step], rollouts.actions[step], args.gamma,
-                    rollouts.masks[step])
-
         rollouts.compute_returns(next_value, args.use_gae, args.gamma,
                                  args.gae_lambda, args.use_proper_time_limits)
         
         if args.algo == 'ppo':
             value_loss, action_loss, dist_entropy, approx_kl, clipfracs, \
                 auxiliary_loss = agent.update(rollouts)
-
         else:
             value_loss, action_loss, dist_entropy = agent.update(rollouts)
 
@@ -437,10 +314,6 @@ def main():
             writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
         # writer.add_scalar("losses/explained_variance", explained_var, global_step)
         writer.add_scalar("charts/SPS", int(global_step / (time.time() - start)), global_step)
-
-        #Attempt to manually log any videos to W&B if they exist
-        if args.capture_video and 'video' in os.listdir():
-            upload_videos()
 
         # save for every interval-th episode or for the last epoch
         if (j % args.save_interval == 0
@@ -479,12 +352,6 @@ def main():
             obs_rms = utils.get_vec_normalize(envs).obs_rms
             evaluate(actor_critic, obs_rms, args.env_name, args.seed,
                      args.num_processes, eval_log_dir, device)
-
-    #Finally log all remaining videos
-    if args.track and args.capture_video and 'video' in os.listdir():
-        time.sleep(5)
-        upload_videos()
-
 
 
     if args.config_file_name is not None:

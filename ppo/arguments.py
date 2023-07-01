@@ -266,7 +266,7 @@ def get_args():
         help='auxiliary loss coefficient (default: 0.3)')
     #Andy: add flag to use new auxiliary training methods that split each aux task into individually computed
     #losses so that we can specify different truth sizes and loss functions
-    parser.add_argument('--use-new-aux', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True,
+    parser.add_argument('--use-new-aux', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=False,
         help='if toggled, use new auxiliary training algorithms PPOAux, RolloutStorageAux')
     parser.add_argument('--auxiliary-truth-sizes', nargs='*', action=ParseList, default=[])
     

@@ -1,6 +1,6 @@
-from a2c_ppo_acktr.storage import RolloutStorage
-from a2c_ppo_acktr.envs import make_vec_envs
-from a2c_ppo_acktr import algo, utils
+from ppo.storage import RolloutStorage
+from ppo.envs import make_vec_envs
+from ppo import algo, utils
 import torch
 from collections import deque
 

@@ -1,7 +1,7 @@
 import sys
 sys.path.append('..')
-from a2c_ppo_acktr import algo, utils
-from a2c_ppo_acktr.algo.ppo import PPO, PPOAux
+from ppo import algo, utils
+from ppo.algo.ppo import PPO, PPOAux
 import gym
 import numpy as np
 import torch
@@ -17,9 +17,9 @@ import matplotlib.pyplot as plt
 from read_experiments import *
 from model_evaluation import *
 
-from a2c_ppo_acktr.storage import RolloutStorage, RolloutStorageAux
-from a2c_ppo_acktr.envs import make_vec_envs
-from  a2c_ppo_acktr.model import Policy
+from ppo.storage import RolloutStorage, RolloutStorageAux
+from ppo.envs import make_vec_envs
+from  ppo.model import Policy
 import torch
 
 import proplot as pplt

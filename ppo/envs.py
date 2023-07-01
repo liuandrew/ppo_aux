@@ -95,18 +95,21 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, capture_video=Fals
 
 #Andy: add capture video param, add optional env kwargs
 def make_vec_envs(env_name,
-                  seed,
-                  num_processes,
-                  gamma,
-                  log_dir,
-                  device,
-                  allow_early_resets,
+                  seed=None,
+                  num_processes=1,
+                  gamma=0.99,
+                  log_dir=None,
+                  device=torch.device('cpu'),
+                  allow_early_resets=True,
                   num_frame_stack=None,
                   capture_video=False,
                   normalize=True,
                   env_kwargs={},
                   auxiliary_tasks=[],
                   auxiliary_task_args=[]):
+    if seed is None:
+        seed = np.random.randint(0, 1e9)
+        
     envs = [
         make_env(env_name, seed, i, log_dir, allow_early_resets, capture_video,
                 env_kwargs)
