@@ -53,7 +53,7 @@ def draw_trajectory(pos=None, angle=None, fig=None, ax=None):
 
 
 def draw_box(corner, size=[20, 20], ax=None, c=np.array([0.6, 0.6, 0.6])):
-    rect = plt.Rectangle(corner, size[0], size[1], fc=np.array([0.6, 0.6, 0.6]))        
+    rect = plt.Rectangle(corner, size[0], size[1], fc=c)        
     if ax == None:
         plt.gca().add_patch(rect)
     else:

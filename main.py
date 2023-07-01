@@ -4,6 +4,7 @@ import os
 import time
 from collections import deque
 from shutil import copyfile
+from pathlib import Path
 
 import gym
 import gym_nav
@@ -23,7 +24,7 @@ from ppo.model import Policy
 from ppo.storage import RolloutStorage, RolloutStorageAux
 from evaluation import evaluate
 
-from scheduler import write_latest_exp_complete
+from scheduler import archive_config_file
 
 
 def main():
@@ -86,41 +87,15 @@ def main():
     if args.nn_base != 'FlexBaseAux':
         print('WARNING: nn_base should probably be FlexBaseAux for new aux methods')
 
-    # Andy: generate save path ahead of time
-    if args.save_subdir is not None:
-        save_path = os.path.join(args.save_dir, args.save_subdir)
-        try:
-            os.makedirs(save_path)
-        except OSError:
-            pass
-    else:
-        save_path = os.path.join(args.save_dir, args.algo)
-        try:
-            os.makedirs(save_path)
-        except OSError:
-            pass
-
     if args.save_name is not None:
-        save_path = os.path.join(save_path, args.save_name + '.pt')
-    else:
-        save_path = os.path.join(save_path, args.env_name)
-
+        save_path = Path('saved_models/' + args.save_dir)
+        save_path.mkdir(exist_ok=True, parents=True)
+        save_path = save_path/f'{args.save_name}.pt'
 
     # Andy: generate path for saving checkpoints
     if args.checkpoint_interval > 0:
-        checkpoint_path = os.path.join(args.save_dir, 'checkpoint')
-        try:
-            os.makedirs(checkpoint_path)
-        except OSError:
-            pass
-
-        # Generate sub-directory with experiment name
-        checkpoint_path = os.path.join(checkpoint_path, args.exp_name)
-        try:
-            os.makedirs(checkpoint_path)
-        except OSError:
-            pass
-    
+        chk_folder = Path('saved_checkpoints/' + args.checkpoint_dir)/args.save_name
+        chk_folder.mkdir(exist_ok=True, parents=True)    
 
 
     torch.set_num_threads(1)
@@ -328,10 +303,11 @@ def main():
         # Andy: if checkpointing, save every interval-th episode
         # Note that 0th update is actually the 1st update, because this comes after update code
         if args.checkpoint_interval > 0 and (j % args.checkpoint_interval == 0 or j == num_updates - 1):
+            chk_path = chk_folder/f'{j}.pt'
             torch.save([
                 actor_critic,
                 getattr(utils.get_vec_normalize(envs), 'obs_rms', None)
-            ], os.path.join(checkpoint_path, str(j) + '.pt'))
+            ], chk_path)
 
         if j % args.log_interval == 0 and len(episode_rewards) > 1:
             total_num_steps = (j + 1) * args.num_processes * args.num_steps
@@ -355,7 +331,7 @@ def main():
 
 
     if args.config_file_name is not None:
-        write_latest_exp_complete(args.config_file_name)
+        archive_config_file(args.config_file_name)
         print('Experiment completed, experiment log updated')
 
 
