@@ -410,7 +410,7 @@ class NavEnvFlat(gym.Env):
                 task_structure=1, poster=False, auxiliary_tasks=[],
                 auxiliary_task_args=[], fixed_reset=[None, None],
                 character_reset_pos=0, turn_speed=0.2, move_speed=10,
-                num_actions=4, num_grid_slices=5, goal_ size=20, goal_corner=None,
+                num_actions=4, num_grid_slices=5, goal_size=20, goal_corner=None,
                 separate_aux_tasks=False, poster_thickness=None,
                 render_character=True, wall_thickness=None,
                 one_hot_obs=False):
@@ -418,6 +418,7 @@ class NavEnvFlat(gym.Env):
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
                         'explore' - additional reward given for each section explored
+                        'explorepunish' - negative reward given when spending time near previous spots
         give_heading: whether to additionally give a distance and direction to goal
         flat: whether to give observations in a flattened state
         world_gen_func: a function can be passed to manually create a world
@@ -647,6 +648,25 @@ class NavEnvFlat(gym.Env):
                 info['bonus_reward'] = self.sub_goal_reward
             else:
                 info['bonus_reward'] = 0
+        elif self.rew_structure == 'explorepunish':
+            pos = self.character.pos
+            self.visited_positions[self.visited_idx] = pos.copy()
+            self.visited_idx += 1
+
+            lim_idx = int(np.clip(self.visited_idx-10, 0, np.inf))
+            
+            if lim_idx > 0:
+                dists = self.visited_positions[:lim_idx] - pos
+                dist = np.min(np.sum(dists**2, axis=1))
+                dist = np.sqrt(dist)
+                
+                # This pretty much goes to 0 around dist of 50, which is tuned
+                #  to a move speed of 10
+                punish = -np.exp(-dist/10) * self.sub_goal_reward
+                reward += punish
+                info['bonus_reward'] = punish
+            
+            
             
             
 
@@ -691,6 +711,10 @@ class NavEnvFlat(gym.Env):
         if self.task_structure == 3 and collision_obj != None and \
             collision_obj.is_goal:
             observation[self.ray_obs_width] = 1
+            
+            if self.rew_structure == 'explorepunish':
+                self.visited_positions = np.full((self.max_steps + 50, 2), np.inf)
+                self.visited_idx = 0
         auxiliary_output = self.get_auxiliary_output()
         info['auxiliary'] = auxiliary_output
         
@@ -735,7 +759,9 @@ class NavEnvFlat(gym.Env):
         self.total_rewards = 0
         
         self.visited_sections = np.zeros((self.num_grid_slices, self.num_grid_slices,))
-        
+        self.visited_positions = np.full((self.max_steps + 50, 2), np.inf)
+        self.visited_idx = 0
+
         return observation
 
     
@@ -1028,7 +1054,7 @@ class NavEnvFlat(gym.Env):
             pos = np.array([150., 150.])
             angle = np.pi / 2
             
-        self.character = Character(pos, angle, num_rays=self.num_rays, fov=self.fov)
+        self.character = Character(pos, angle, num_rays=self.num_rays, fov=self.fov, one_hot_obs=self.one_hot_obs)
         self.character.update_walls(self.vis_walls, self.vis_wall_refs,
                                     self.col_walls, self.col_wall_refs)
 
@@ -1046,10 +1072,9 @@ class NavEnvFlat(gym.Env):
             goal_size = [20, 20]
         wall_thickness = 1
         
-        
-        pos = self.fixed_reset[0].copy()
+        pos = self.fixed_reset[0]
         angle = self.fixed_reset[1]
-        if type(pos) == type(None):
+        if pos is None:
             while searching:
                 # Old position randomizer - too much space away from goal
                 if self.character_reset_pos == 0:
@@ -1060,11 +1085,14 @@ class NavEnvFlat(gym.Env):
                     pos = np.random.uniform(low=wall_thickness+3, high=300-wall_thickness-3, size=(2,))
                     if dist(goal_center - pos) > max(goal_size)*1.5:
                         searching = False
-        
+        else:
+            pos = pos.copy()
+            
         if angle == None:
             angle = np.random.uniform(0, 2*np.pi)
 
-        self.character = Character(pos, angle, num_rays=self.num_rays, fov=self.fov)
+        self.character = Character(pos, angle, num_rays=self.num_rays, fov=self.fov,
+                                   one_hot_obs=self.one_hot_obs)
         self.character.update_walls(self.vis_walls, self.vis_wall_refs,
                                     self.col_walls, self.col_wall_refs)
         self.character.update_rays()

@@ -89,8 +89,6 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
                 data = data_callback(None, envs, rnn_hxs,
                     obs, [], [], [False], data, first=True)
 
-        
-        
             with torch.no_grad():
                 outputs = actor_critic.act(obs, rnn_hxs, 
                                         masks, deterministic=deterministic,
@@ -141,6 +139,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
             #             print('ep ' + str(len(eval_episode_rewards)) + ' rew ' + \
             #                 str(info['episode']['r']))
             
+            step += 1
+            
             if done[0]:
                 all_obs.append(np.vstack(ep_obs))
                 all_actions.append(np.vstack(ep_actions))
@@ -176,6 +176,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
                 ep_auxiliary_truths = []
                 
                 break
+            
+            
   
 
     envs.close()

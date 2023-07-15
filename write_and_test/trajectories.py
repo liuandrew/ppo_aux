@@ -163,9 +163,9 @@ id_to_label = {
     5: 'uncertain_direct',
     6: 'stuck'
 }
-for _, label in id_to_label.items():
-    folder = img_folder/label
-    folder.mkdir(exist_ok=True)
+# for _, label in id_to_label.items():
+#     folder = img_folder/label
+#     folder.mkdir(exist_ok=True)
 
 def save_trajectory(pos, angle, file):
     img_arr = convert_trajectory_to_rgb(pos, angle)
