@@ -151,8 +151,11 @@ class Character:
 
         # Get distances, colors and a plottable        
         self.ray_dists = dists[wall_idxs2[0], wall_idxs2[1]]
-        self.ray_colors = list(map(lambda x: x.color, self.vis_wall_refs[wall_idxs]))
-        # !! Need to change this to make rays end on collision for rendering purposes
+        
+        if self.one_hot_obs:
+            self.ray_colors = list(map(lambda x: x.color-1, self.vis_wall_refs[wall_idxs]))
+        else:
+            self.ray_colors = list(map(lambda x: x.color-1, self.vis_wall_refs[wall_idxs]))
         
         ray_ends = ray_mults * self.ray_dists.reshape(-1, 1) + self.pos
         
