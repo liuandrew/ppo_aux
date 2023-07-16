@@ -419,7 +419,7 @@ class ShortcutNavEnv(gym.Env):
                 num_actions=4, num_grid_slices=5, goal_size=25, goal_corner=None,
                 separate_aux_tasks=False, poster_thickness=None,
                 render_character=True, wall_thickness=None,
-                one_hot_obs=True):
+                one_hot_obs=True, shortcut_probability=0.2):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
@@ -526,6 +526,7 @@ class ShortcutNavEnv(gym.Env):
         self.last_reward = 0
         self.poster_thickness = poster_thickness
         self.wall_thickness = wall_thickness
+        self.shortcut_probability = shortcut_probability
         
         observation_width = num_rays
         self.ray_obs_width = num_rays
@@ -981,7 +982,11 @@ class ShortcutNavEnv(gym.Env):
         else:
             goal_size = [20, 20]
                     
-        self.boxes, walls, wall_refs = self.make_walls(thickness=wall_thickness)
+        if np.random.random() < self.shortcut_probability:
+            make_shortwall = False
+        else:
+            make_shortwall = True
+        self.boxes, walls, wall_refs = self.make_walls(thickness=wall_thickness, with_shortwall=make_shortwall)
 
         if self.task_structure == 1:
             #generate a visible goal with random position
