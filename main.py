@@ -52,7 +52,11 @@ def main():
         logdir = wandb.run.dir
         writer = SummaryWriter(logdir)
     else:
-        writer = SummaryWriter(f"runs/{run_name}")
+        writer_path = Path('runs/' + args.save_dir)
+        writer_path.mkdir(exist_ok=True, parents=True)
+        writer_path = writer_path/run_name
+
+        writer = SummaryWriter(writer_path)
 
     writer.add_text(
         "hyperparameters",
@@ -94,7 +98,7 @@ def main():
 
     # Andy: generate path for saving checkpoints
     if args.checkpoint_interval > 0:
-        chk_folder = Path('saved_checkpoints/' + args.checkpoint_dir)/args.save_name
+        chk_folder = Path('saved_checkpoints/' + args.save_dir)/args.save_name
         chk_folder.mkdir(exist_ok=True, parents=True)    
 
 
