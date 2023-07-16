@@ -687,7 +687,7 @@ class NavEnvFlat(gym.Env):
                     self.reset_character_position()
             else:
 #                 reward = -10
-                reward = float(self.collission_penalty)
+                reward += float(self.collission_penalty)
                 
         if self.task_structure == 4:
             # Give reward if character is in the correct grid

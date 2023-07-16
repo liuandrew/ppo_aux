@@ -273,3 +273,133 @@ def explore_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, 
         data['ep_angle'].append(angle)
     
     return data
+
+
+def simple_vec_envs(obs_rms=None, env_name='NavEnv-v0', normalize=True, seed=None, num_processes=1,
+             device=torch.device('cpu'), capture_video=False, env_kwargs={},
+             aux_wrapper_kwargs={}, eval_log_dir=None):
+    if seed is None:
+        seed = np.random.randint(0, 1e9)
+
+    envs = make_vec_envs(env_name, seed + num_processes, num_processes,
+                              None, eval_log_dir, device, True, 
+                              capture_video=capture_video, 
+                              env_kwargs=env_kwargs, normalize=normalize,
+                              **aux_wrapper_kwargs)
+    
+    vec_norm = utils.get_vec_normalize(envs)
+    
+    if obs_rms is None:
+        #If obs_rms is not given, make it a learning normalize vector envs
+        pass
+    else:
+        vec_norm.eval()
+        vec_norm.obs_rms = obs_rms
+        
+    return envs
+
+
+
+def evaluate_steps(actor_critic, envs, num_steps=10, data_callback=None, 
+                   device=torch.device('cpu'), deterministic=True,
+                   with_activations=False):
+    data = {}
+    ep_obs = []
+    ep_actions = []
+    ep_rewards = []
+    ep_rnn_hxs = []
+    ep_dones = []
+    ep_values = []
+    ep_masks = []
+    ep_actor_features = []
+    
+    ep_auxiliary_preds = []
+    ep_activations = []
+    ep_auxiliary_truths = []
+    
+
+    num_processes = len(envs.envs)
+    obs = envs.reset()
+    rnn_hxs = torch.zeros(
+        num_processes, actor_critic.recurrent_hidden_state_size, device=device)
+    masks = torch.zeros(num_processes, 1, device=device)
+
+    step = 0
+    
+    while step < num_steps:
+        ep_obs.append(obs)
+        ep_rnn_hxs.append(rnn_hxs)
+        if data_callback is not None and step == 0:
+            data = data_callback(None, envs, rnn_hxs,
+                obs, [], [], [False], data, first=True)
+
+        with torch.no_grad():
+            outputs = actor_critic.act(obs, rnn_hxs, 
+                                    masks, deterministic=deterministic,
+                                    with_activations=with_activations)
+            action = outputs['action']
+            rnn_hxs = outputs['rnn_hxs']
+        obs, reward, done, infos = envs.step(action)
+        
+        masks = torch.tensor(
+            [[0.0] if done_ else [1.0] for done_ in done],
+            dtype=torch.float32,
+            device=device)
+        
+        ep_actions.append(action)
+        ep_rewards.append(reward)
+        ep_dones.append(done)
+        ep_values.append(outputs['value'])
+        ep_masks.append(masks)
+        ep_actor_features.append(outputs['actor_features'])
+        
+        if 'auxiliary_preds' in outputs:
+            ep_auxiliary_preds.append(outputs['auxiliary_preds'])
+        
+        if with_activations:
+            ep_activations.append(outputs['activations'])
+
+        if data_callback is not None:
+            data = data_callback(None, envs, rnn_hxs,
+                obs, action, reward, done, data)
+        else:
+            data = {}
+            
+        auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
+        for info in infos:
+            if 'auxiliary' in info and len(info['auxiliary']) > 0:
+                for i, aux in enumerate(info['auxiliary']):
+                    auxiliary_truths[i].append(aux)
+        if len(auxiliary_truths) > 0:
+            auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
+        ep_auxiliary_truths.append(auxiliary_truths)
+        
+        
+        # for info in infos:
+        #     if 'episode' in info.keys():
+        #         eval_episode_rewards.append(info['episode']['r'])
+        #         #Andy: add verbosity option
+        #         if verbose >= 2:
+        #             print('ep ' + str(len(eval_episode_rewards)) + ' rew ' + \
+        #                 str(info['episode']['r']))
+        
+        step += 1
+        
+        if done[0]:
+            break
+    
+    return {
+        'obs': ep_obs,
+        'actions': ep_actions,
+        'rewards': ep_rewards,
+        'rnn_hxs': ep_rnn_hxs,
+        'dones': ep_dones,
+        'masks': ep_masks,
+        'envs': envs,
+        'data': data,
+        'activations': ep_activations,
+        'values': ep_values,
+        'actor_features': ep_actor_features,
+        'auxiliary_preds': ep_auxiliary_preds,
+        'auxiliary_truths': ep_auxiliary_truths,
+    }
