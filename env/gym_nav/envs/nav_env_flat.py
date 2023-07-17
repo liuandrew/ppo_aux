@@ -418,7 +418,11 @@ class NavEnvFlat(gym.Env):
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
                         'explore' - additional reward given for each section explored
-                        'explorepunish' - negative reward given when spending time near previous spots
+                        'explorepunish' - negative reward given when spending time near previous spots.
+                            Punishable previous positions delayed by 10 time steps, exponentially decaying punishment
+                            from closest past position. The time delay seems like it might cause a wiggling pattern
+                        'explorepunish2' - negative reward when returning close to previous spots
+                            Tracks when we have moved away and return, fixed punishment every timestep
         give_heading: whether to additionally give a distance and direction to goal
         flat: whether to give observations in a flattened state
         world_gen_func: a function can be passed to manually create a world

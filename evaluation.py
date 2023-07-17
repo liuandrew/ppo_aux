@@ -227,7 +227,7 @@ def nav_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stac
         data['angle'].append(np.vstack(data['ep_angle']))
         
         data['ep_pos'] = []
-        data['ep_angle'] = []        
+        data['ep_angle'] = []    
     elif not done[0]:
         pos = env.get_attr('character')[0].pos.copy()
         angle = env.get_attr('character')[0].angle

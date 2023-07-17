@@ -22,7 +22,7 @@ class Policy(nn.Module):
             if len(obs_shape) == 3:
                 base = CNNBase
             elif len(obs_shape) == 1:
-                base = MLPBase
+                base = FlexBaseAux
             else:
                 raise NotImplementedError
         elif type(base) == str:
@@ -85,32 +85,12 @@ class Policy(nn.Module):
         raise NotImplementedError
 
     def act(self, inputs, rnn_hxs, masks, deterministic=False, with_activations=False):
-        # !! ANDY: This is kind of hardcoded to be able to evaluate old models
-        # For the most part, we are using FlexBase moving forward, but the best thing
-        # to do here would be to refactor everything to return dictionaries of results
-        # We also haven't tested everything with MLPBase so there may be bugs
-        # if type(self.base) != MLPBase and self.base.has_auxiliary:
-        if type(self.base) == FlexBase or type(self.base) == FlexBaseAux:
-            # value, actor_features, rnn_hxs, auxiliary = \
-            #     self.base(inputs, rnn_hxs, masks, deterministic)
-            outputs = self.base(inputs, rnn_hxs, masks, deterministic, with_activations)
-            value = outputs['value']
-            actor_features = outputs['actor_features']
-            rnn_hxs = outputs['rnn_hxs']
-            if not self.base.has_auxiliary:
-                outputs['auxiliary_preds'] = None
-
-        
-        else:
-            value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
-            # if no auxiliary output, storage will expect an output 0
-            # with shape the same as value
-            outputs = {
-                'value': value,
-                'actor_features': actor_features,
-                'rnn_hxs': rnn_hxs,
-                'auxiliary_preds': None
-            }
+        outputs = self.base(inputs, rnn_hxs, masks, deterministic, with_activations)
+        value = outputs['value']
+        actor_features = outputs['actor_features']
+        rnn_hxs = outputs['rnn_hxs']
+        if not self.base.has_auxiliary:
+            outputs['auxiliary_preds'] = None
 
         dist = self.dist(actor_features)
 
@@ -135,17 +115,13 @@ class Policy(nn.Module):
     def evaluate_actions(self, inputs, rnn_hxs, masks, action):
         
         # Andy: Should refactor this function to also return outputs dict
-        if type(self.base) == FlexBase or type(self.base) == FlexBaseAux:
-            outputs = self.base(inputs, rnn_hxs, masks)
-            actor_features = outputs['actor_features']
-            value = outputs['value']
-            rnn_hxs = outputs['rnn_hxs']
-            if self.base.has_auxiliary:
-                auxiliary = outputs['auxiliary_preds']
-            else:
-                auxiliary = torch.zeros(value.shape)
+        outputs = self.base(inputs, rnn_hxs, masks)
+        actor_features = outputs['actor_features']
+        value = outputs['value']
+        rnn_hxs = outputs['rnn_hxs']
+        if self.base.has_auxiliary:
+            auxiliary = outputs['auxiliary_preds']
         else:
-            value, actor_features, rnn_hxs = self.base(inputs, rnn_hxs, masks)
             auxiliary = torch.zeros(value.shape)
 
         dist = self.dist(actor_features)
@@ -995,6 +971,146 @@ class FlexBaseAux(NNBase):
                     
         # Finally get critic value estimation
         critic_val = self.critic_layers[-1](critic_x)
+
+        outputs = {
+            'value': critic_val,
+            'actor_features': actor_x,
+            'rnn_hxs': rnn_hxs,
+        }
+        
+        if self.has_auxiliary:
+            outputs['auxiliary_preds'] = auxiliary_preds
+        if with_activations:
+            outputs['activations'] = {
+                'shared_activations': shared_activations,
+                'actor_activations': actor_activations,
+                'critic_activations': critic_activations
+            }        
+        return outputs
+    
+    
+class DelayedRNNPPO(NNBase):
+    '''
+    Quick and simple static RNN network with a FC followed by RNN followed by
+    2 layers of actor critic split
+    '''
+    def __init__(self, num_inputs, hidden_size=64,
+                auxiliary_heads=[], recurrent=True):
+        super(DelayedRNNPPO, self).__init__(True, hidden_size, hidden_size)
+        # parameters create self.GRU with hidden_size as recurrent_input_size and
+        #  hidden_size as recurrent_hidden_size
+        
+        self.auxiliary_heads = auxiliary_heads
+        self.has_auxiliary = True
+
+        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                               constant_(x, 0), np.sqrt(2))
+                
+        self.shared_layers = []
+        self.critic_layers = []
+        self.actor_layers = []
+        self.conv1d_layers = []
+        
+        # generate all the shared layers        
+        self.shared0 = nn.Sequential(init_(nn.Linear(num_inputs, hidden_size)),
+                                nn.Tanh())
+        self.critic0 = nn.Sequential(init_(nn.Linear(hidden_size, hidden_size)),
+                                nn.Tanh())
+        self.critic1 = nn.Sequential(init_(nn.Linear(hidden_size, hidden_size)),
+                                nn.Tanh())
+        self.actor0 = nn.Sequential(init_(nn.Linear(hidden_size, hidden_size)),
+                                nn.Tanh())
+        self.actor1 = nn.Sequential(init_(nn.Linear(hidden_size, hidden_size)),
+                                nn.Tanh())        
+        self.critic_head = init_(nn.Linear(hidden_size, 1))
+        
+            
+        self.auxiliary_layers = []
+        self.auxiliary_output_idxs = [] # indexes for generating auxiliary outputs
+        self.auxiliary_layer_types = [] # 0 linear, 1 distribution
+        self.auxiliary_output_sizes = []
+        # generate auxiliary outputs
+        current_auxiliary_output_idx = 0
+        # for i, head in enumerate(auxiliary_heads):
+        #     depth = head[0]
+        #     if depth == -1:
+        #         depth = self.num_layers
+        #     side = head[1]
+        #     output_type = head[2]
+        #     output_size = head[3]
+        #     self.auxiliary_output_idxs.append(current_auxiliary_output_idx)
+        #     if depth == 0:
+        #         raise Exception('Auxiliary task requesting depth of 0')
+        #     if depth > self.num_layers:
+        #         raise Exception('Auxiliary task requesting depth greater than exists in network (head[0])')
+        #     if side > 1:
+        #         raise Exception('Auxiliary task requesting side that is not 0 (actor) or 1 (critic)')
+        #     total_shared_layers = num_shared_layers
+        #     if recurrent: 
+        #         total_shared_layers += 1
+
+        #     if side == -1:
+        #         if depth > total_shared_layers:
+        #             raise Exception('Auxiliary task expects to be on shared layers, but is assigned to layers past shared')
+        #     else:
+        #         if depth <= total_shared_layers:
+        #             raise Exception('Auxiliary task expects to be on individual layers, but is assigned to shared depth')
+            
+        #     if output_type == 0:
+        #         # linear output
+        #         layer = init_(nn.Linear(hidden_size, output_size))
+        #         self.auxiliary_output_sizes.append(output_size)
+        #         self.auxiliary_layer_types.append(0)
+        #     elif output_type == 1:
+        #         # output based on gym space
+        #         # code taken from Policy to implement a dist function
+        #         layer = Categorical(hidden_size, output_size)
+        #         self.auxiliary_output_sizes.append(output_size)
+        #         self.auxiliary_layer_types.append(1)
+        #     else:
+        #         raise NotImplementedError
+                
+        #     setattr(self, 'auxiliary'+str(i), layer)
+        #     self.auxiliary_layers.append(getattr(self, 'auxiliary'+str(i)))
+        
+        # if len(self.auxiliary_output_sizes) == 0:
+            # self.has_auxiliary = False
+            
+        self.has_auxiliary = False
+        self.train()
+        
+        
+    def forward(self, inputs, rnn_hxs, masks, deterministic=False, with_activations=False):
+        """Same as forward function but this will pass back all intermediate values
+
+            _type_: _description_
+        """
+        auxiliary_preds = [None for i in range(len(self.auxiliary_output_sizes))]
+        x = inputs
+
+        shared_activations = []
+        actor_activations = []
+        critic_activations = []
+
+        x = self.shared0(x)
+        if x.dim() == 1:
+            x = x.unsqueeze(0)
+        shared_activations.append(x)
+        x, rnn_hxs = self._forward_gru(x, rnn_hxs, masks)
+        shared_activations.append(x)
+        
+        actor_x = self.actor0(x)
+        actor_activations.append(actor_x)
+        actor_x = self.actor1(actor_x)
+        actor_activations.append(actor_x)
+        
+        critic_x = self.critic0(x)
+        critic_activations.append(critic_x)
+        critic_x = self.critic1(x)
+        critic_activations.append(critic_x)
+                    
+        # Finally get critic value estimation
+        critic_val = self.critic_head(critic_x)
 
         outputs = {
             'value': critic_val,
