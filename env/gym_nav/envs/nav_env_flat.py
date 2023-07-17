@@ -665,6 +665,28 @@ class NavEnvFlat(gym.Env):
                 punish = -np.exp(-dist/10) * self.sub_goal_reward
                 reward += punish
                 info['bonus_reward'] = punish
+        elif self.rew_structure == 'explorepunish2':
+            pos = self.character.pos
+            self.visited_positions[self.visited_idx] = pos.copy()
+            self.visited_idx += 1
+
+            # Check whether we have moved away from any recorded positions
+            dist_required = 20
+            infs = (self.visited_positions == np.inf).all(axis=1)
+            check_pos = self.visited_positions[~self.visited_distanced & ~infs]
+            check_dists = np.sqrt(np.sum((check_pos - pos)**2, axis=1))
+            idxs = np.arange(self.visited_distanced.shape[0])[~self.visited_distanced & ~infs][check_dists > dist_required]
+            self.visited_distanced[idxs] = True
+            
+            # Next give flat punishment for returning close enough to an existing location
+            repeat_dist = 15
+            check_pos = self.visited_positions[self.visited_distanced]
+            check_dists = np.sqrt(np.sum((check_pos - pos)**2, axis=1))
+            if (check_dists < repeat_dist).any():
+                reward += -self.sub_goal_reward
+                info['bonus_reward'] = -self.sub_goal_reward
+            
+            
             
             
             
@@ -712,8 +734,9 @@ class NavEnvFlat(gym.Env):
             collision_obj.is_goal:
             observation[self.ray_obs_width] = 1
             
-            if self.rew_structure == 'explorepunish':
+            if self.rew_structure == 'explorepunish' or self.rew_structure == 'explorepunish2':
                 self.visited_positions = np.full((self.max_steps + 50, 2), np.inf)
+                self.visited_distanced = np.full((self.max_steps + 50), False)
                 self.visited_idx = 0
         auxiliary_output = self.get_auxiliary_output()
         info['auxiliary'] = auxiliary_output
@@ -760,6 +783,7 @@ class NavEnvFlat(gym.Env):
         
         self.visited_sections = np.zeros((self.num_grid_slices, self.num_grid_slices,))
         self.visited_positions = np.full((self.max_steps + 50, 2), np.inf)
+        self.visited_distanced = np.full((self.max_steps + 50), False)
         self.visited_idx = 0
 
         return observation

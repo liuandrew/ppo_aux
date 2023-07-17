@@ -228,7 +228,7 @@ def initialize_ppo_training(model=None, obs_rms=None, env_name='NavEnv-v0', env_
                             auxiliary_loss_coef=0.3, gamma=0.99, lr=7e-4, eps=1e-5, max_grad_norm=0.5,
                             log_dir='/tmp/gym/', device=torch.device('cpu'), 
                             capture_video=False, take_optimizer_step=True,
-                            normalize=True, obs=None, aux_wrapper_kwargs={}, new_aux=True,
+                            normalize=True, obs=None, aux_wrapper_kwargs={},
                             auxiliary_truth_sizes=[]):
     """Generate training objects, specifically setting up everything to generate gradients
         Important parameters:
@@ -286,13 +286,10 @@ def initialize_ppo_training(model=None, obs_rms=None, env_name='NavEnv-v0', env_
     else:
         envs = None
 
-    env = gym.make('NavEnv-v0', **env_kwargs)
+    env = gym.make(env_name, **env_kwargs)
 
     if model is None:
-        if new_aux:
-            nn_base = 'FlexBaseAux'
-        else:
-            nn_base = 'FlexBase'
+        nn_base = 'FlexBaseAux'
         model = Policy(env.observation_space.shape,
                        env.action_space,
                        base=nn_base,
@@ -319,13 +316,9 @@ def initialize_ppo_training(model=None, obs_rms=None, env_name='NavEnv-v0', env_
 
 
     #Initialize storage
-    if new_aux:
-        rollouts = RolloutStorageAux(num_steps, num_processes, env.observation_space.shape, env.action_space,
-                            model.recurrent_hidden_state_size, model.auxiliary_output_sizes,
-                            auxiliary_truth_sizes)
-    else:
-        rollouts = RolloutStorage(num_steps, num_processes, env.observation_space.shape, env.action_space,
-                                model.recurrent_hidden_state_size, model.auxiliary_output_size)
+    rollouts = RolloutStorageAux(num_steps, num_processes, env.observation_space.shape, env.action_space,
+                        model.recurrent_hidden_state_size, model.auxiliary_output_sizes,
+                        auxiliary_truth_sizes)
     #Storage objects initializes a bunch of empty tensors to store information, e.g.
     #obs has shape (num_steps+1, num_processes, obs_shape)
     #rewards has shape (num_steps, num_processes, 1)
