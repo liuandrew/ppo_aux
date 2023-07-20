@@ -413,16 +413,18 @@ class NavEnvFlat(gym.Env):
                 num_actions=4, num_grid_slices=5, goal_size=20, goal_corner=None,
                 separate_aux_tasks=False, poster_thickness=None,
                 render_character=True, wall_thickness=None,
-                one_hot_obs=False):
+                one_hot_obs=False, bonus_multiplier=1, explore_punish_arg=10):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
-                        'explore' - additional reward given for each section explored
-                        'explorepunish' - negative reward given when spending time near previous spots.
+                        'explorebonus' - additional reward given for each section explored
+                        'explorepunish1' - negative reward given when spending time near previous spots.
                             Punishable previous positions delayed by 10 time steps, exponentially decaying punishment
                             from closest past position. The time delay seems like it might cause a wiggling pattern
                         'explorepunish2' - negative reward when returning close to previous spots
                             Tracks when we have moved away and return, fixed punishment every timestep
+            bonus_multiplier: how much larger bonus should be than punishment
+            explore_punish_arg: how many timesteps or distance for punishment to activate
         give_heading: whether to additionally give a distance and direction to goal
         flat: whether to give observations in a flattened state
         world_gen_func: a function can be passed to manually create a world
@@ -526,6 +528,11 @@ class NavEnvFlat(gym.Env):
         self.poster_thickness = poster_thickness
         self.wall_thickness = wall_thickness
         
+        # These are really getting to a silly amount of hyperparameters,
+        #  but hopefully we can simply tune one set to make exploration viable
+        self.bonus_multiplier = bonus_multiplier
+        self.explore_punish_arg = explore_punish_arg
+        
         observation_width = num_rays
         self.ray_obs_width = num_rays
         self.one_hot_obs = one_hot_obs
@@ -620,6 +627,8 @@ class NavEnvFlat(gym.Env):
                 reward = float(1)
                 done = True
 
+        if self.rew_structure != 'goal':
+            info['bonus_reward'] = 0
         if self.rew_structure == 'dist':
             goal = self.boxes[-1]
             dist_to_goal = self.sub_goal_reward * \
@@ -630,7 +639,7 @@ class NavEnvFlat(gym.Env):
                 
             reward += float(dist_to_goal)
             info['bonus_reward'] = float(dist_to_goal)
-        elif self.rew_structure == 'explore': 
+        if 'explorebonus' in self.rew_structure: 
             x_grids = np.linspace(0, WINDOW_SIZE[0], self.num_grid_slices+1)
             y_grids = np.linspace(0, WINDOW_SIZE[1], self.num_grid_slices+1)
             x = self.character.pos[0]
@@ -649,15 +658,15 @@ class NavEnvFlat(gym.Env):
             if self.visited_sections[x_grid, y_grid] == 0:
                 self.visited_sections[x_grid, y_grid] = 1
                 reward += self.sub_goal_reward
-                info['bonus_reward'] = self.sub_goal_reward
-            else:
-                info['bonus_reward'] = 0
-        elif self.rew_structure == 'explorepunish':
+                info['bonus_reward'] += self.sub_goal_reward * self.bonus_multiplier
+        if 'explorepunish1' in self.rew_structure:
             pos = self.character.pos
             self.visited_positions[self.visited_idx] = pos.copy()
             self.visited_idx += 1
 
-            lim_idx = int(np.clip(self.visited_idx-10, 0, np.inf))
+            # explore_punish_arg determines how many steps before positions become active
+            #  tweaks how much wiggling is learned probably
+            lim_idx = int(np.clip(self.visited_idx-self.explore_punish_arg, 0, np.inf))
             
             if lim_idx > 0:
                 dists = self.visited_positions[:lim_idx] - pos
@@ -668,8 +677,8 @@ class NavEnvFlat(gym.Env):
                 #  to a move speed of 10
                 punish = -np.exp(-dist/10) * self.sub_goal_reward
                 reward += punish
-                info['bonus_reward'] = punish
-        elif self.rew_structure == 'explorepunish2':
+                info['bonus_reward'] += punish
+        if 'explorepunish2' in self.rew_structure:
             pos = self.character.pos
             self.visited_positions[self.visited_idx] = pos.copy()
             self.visited_idx += 1
@@ -683,12 +692,13 @@ class NavEnvFlat(gym.Env):
             self.visited_distanced[idxs] = True
             
             # Next give flat punishment for returning close enough to an existing location
-            repeat_dist = 15
+            # explore_punish_arg determines how close before punishment occurs
+            repeat_dist = self.explore_punish_arg
             check_pos = self.visited_positions[self.visited_distanced]
             check_dists = np.sqrt(np.sum((check_pos - pos)**2, axis=1))
             if (check_dists < repeat_dist).any():
                 reward += -self.sub_goal_reward
-                info['bonus_reward'] = -self.sub_goal_reward
+                info['bonus_reward'] -= self.sub_goal_reward
             
             
             
