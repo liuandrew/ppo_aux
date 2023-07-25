@@ -502,7 +502,8 @@ class ExploreMWM(gym.Env):
         self.wall_colors = wall_colors
         if type(goal_size) == list:
             self.goal_size = np.array(goal_size)
-        self.goal_size = goal_size
+        else:
+            self.goal_size = goal_size
         self.goal_corner = goal_corner
         self.poster = poster
         self.num_rays = num_rays

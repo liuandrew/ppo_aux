@@ -462,9 +462,10 @@ class ShortcutNavEnv(gym.Env):
             First entry - fixed point to reset to
             Second entry - fixed angle to reset to
         character_reset_pos: 
-            0: Old reset position - enforced to be 30 units away from walls and 50 from goal (corner)
-                This position was not what we wanted ideally, but many models trained on this env
-            1: New reset position - enforced to be 3 units away from walls and 30 from goal (center)
+            0: Default reset position - starting at the bottom and facing up
+            1: Starting from anywhere in bottom right quadrant facing top half
+            2: Starting from anywhere in bottom right quadrant facing any direction
+            3: Starting from anywhere below shortcut wall
         goal_size: size of goal as int or array
         goal_corner: array giving x and y position of bottom left corner. If None, use default world
             generator function values
@@ -1045,14 +1046,33 @@ class ShortcutNavEnv(gym.Env):
         self.max_goal_dist = dist([max_x, max_y])
             
 
-        pos_x = np.random.uniform(125, 175)
-        pos_y = np.random.uniform(10, 60)
-        pos = np.array([pos_x, pos_y])
-        angle = np.random.uniform(np.pi/2-0.2, np.pi/2+0.2)
-        
-        if self.task_structure == 4:
-            pos = np.array([150., 150.])
-            angle = np.pi / 2
+        if self.character_reset_pos == 0:
+            pos_x = np.random.uniform(125, 175)
+            pos_y = np.random.uniform(10, 60)
+            pos = np.array([pos_x, pos_y])
+            angle = np.random.uniform(np.pi/2-0.2, np.pi/2+0.2)
+        elif self.character_reset_pos == 1:
+            # bottom-right quadrant, facing top hemisphere
+            pos_x = np.random.uniform(140, 290)
+            pos_y = np.random.uniform(10, 160)
+            pos = np.array([pos_x, pos_y])
+            angle = np.random.uniform(0, np.pi)
+        elif self.character_reset_pos == 2:
+            # bottom-right quadrant, facing anywhere
+            pos_x = np.random.uniform(140, 290)
+            pos_y = np.random.uniform(10, 160)
+            pos = np.array([pos_x, pos_y])
+            angle = np.random.uniform(-np.pi, np.pi)
+        elif self.character_reset_pos == 3:
+            # below shortcut wall, facing anywhere
+            pos_x = np.random.uniform(10, 290)
+            pos_y = np.random.uniform(10, 240)
+            pos = np.array([pos_x, pos_y])
+            angle = np.random.uniform(-np.pi, np.pi)
+                            
+        # if self.task_structure == 4:
+        #     pos = np.array([150., 150.])
+        #     angle = np.pi / 2
             
         self.character = Character(pos, angle, num_rays=self.num_rays, fov=self.fov, one_hot_obs=self.one_hot_obs)
         self.character.update_walls(self.vis_walls, self.vis_wall_refs,
@@ -1074,20 +1094,21 @@ class ShortcutNavEnv(gym.Env):
         
         pos = self.fixed_reset[0]
         angle = self.fixed_reset[1]
-        if pos is None:
-            while searching:
-                # Old position randomizer - too much space away from goal
-                if self.character_reset_pos == 0:
-                    pos = np.random.uniform(low=30, high=270, size=(2,))
-                    if dist(goal_center - pos) > 50:
-                        searching = False
-                elif self.character_reset_pos == 1:
-                    pos = np.random.uniform(low=wall_thickness+3, high=300-wall_thickness-3, size=(2,))
-                    if dist(goal_center - pos) > max(goal_size)*1.5:
-                        searching = False
-        else:
-            pos = pos.copy()
-            
+        # if pos is None:
+        #     while searching:
+        #         # Old position randomizer - too much space away from goal
+        #         if self.character_reset_pos == 0:
+        #             pos = np.random.uniform(low=30, high=270, size=(2,))
+        #             if dist(goal_center - pos) > 50:
+        #                 searching = False
+        #         elif self.character_reset_pos == 1:
+        #             pos = np.random.uniform(low=wall_thickness+3, high=300-wall_thickness-3, size=(2,))
+        #             if dist(goal_center - pos) > max(goal_size)*1.5:
+        #                 searching = False
+        # else:
+        #     pos = pos.copy()
+
+                    
         if angle == None:
             angle = np.random.uniform(0, 2*np.pi)
 
