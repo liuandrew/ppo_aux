@@ -23,11 +23,16 @@ def get_ep_pos_angle_from_data(res):
 
 
 
-def draw_trajectory(pos=None, angle=None, fig=None, ax=None):
+def draw_trajectory(pos=None, angle=None, fig=None, ax=None, rew=None):
     '''Convert positions and angles into an image trajectory
     Adds a few extra details like where the start and goal reached locations are
     as well as adding increasing redness as the agent spends time in one spot rotating
-    without forward movement'''
+    without forward movement
+    
+    rew: optionaly pass rewards for each step and use this to color
+        blue steps rather than using lengh based method which we used previously
+        for fixed goal task
+    '''
     if fig == None and ax == None:
         fig, ax = pplt.subplots()
     stopped = 0
@@ -43,9 +48,16 @@ def draw_trajectory(pos=None, angle=None, fig=None, ax=None):
             stopped = 0
         last_p = p
 
-    #redraw first and last steps
+    #redraw first step
     draw_character(pos[0], angle[0][0], color=[0, 1, 0, 1], size=18, ax=ax)
-    if len(pos) < 202:
+    
+    #draw last step assuming it is a success if number of steps is less than 202
+    #  for the fixed goal task
+    if rew is not None:
+        rew_steps = np.where(rew == 1)[0]
+        for step in rew_steps:
+            draw_character(pos[step], angle[step][0], color=[0, 1, 1, 1], size=18, ax=ax)
+    elif len(pos) < 202:
         draw_character(pos[-1], angle[-1][0], color=[0, 1, 1, 1], size=18, ax=ax)
     ax.format(xlim=[0, 300], ylim=[0, 300])
     

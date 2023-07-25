@@ -7,3 +7,7 @@ register(
     id='ShortcutNav-v0',
     entry_point='gym_nav.envs:ShortcutNavEnv',
 )
+register(
+    id='ExploreNav-v0',
+    entry_point='gym_nav.envs:ExploreMWM',
+)

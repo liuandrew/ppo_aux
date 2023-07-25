@@ -14,6 +14,7 @@ saved_models/*
 .ipynb_checkpoints/*
 write_and_test/.ipynb_checkpoints/*
 write_and_test/__pycache__/*
+write_and_test/data/*
 ppo/algo/__pycache__/*
 ppo/__pycache__/*
 __pycache__/*
