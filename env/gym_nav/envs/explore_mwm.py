@@ -645,7 +645,7 @@ class ExploreMWM(gym.Env):
             
             if self.visited_sections[x_grid, y_grid] == 0:
                 self.visited_sections[x_grid, y_grid] = 1
-                reward += self.sub_goal_reward
+                reward += self.sub_goal_reward * self.bonus_multiplier
                 info['bonus_reward'] += self.sub_goal_reward * self.bonus_multiplier
         if 'explorepunish1' in self.rew_structure:
             pos = self.character.pos

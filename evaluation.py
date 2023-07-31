@@ -275,6 +275,44 @@ def explore_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, 
     return data
 
 
+def shortcut_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stack=False,
+                      first=False):
+    '''
+    Add navigation data pos and angle and position of platform to data
+    '''
+    if 'pos' not in data:
+        data['pos'] = []
+    if 'angle' not in data:
+        data['angle'] = []
+    if 'shortcut' not in data:
+        data['shortcut'] = []
+    if 'ep_pos' not in data:
+        data['ep_pos'] = []
+    if 'ep_angle' not in data:
+        data['ep_angle'] = []
+    if 'ep_shortcut' not in data:
+        data['ep_shortcut'] = []
+
+    if first:
+        shortcut_available = len(env.envs[0].vis_walls) == 6
+        data['ep_shortcut'].append(shortcut_available)
+
+    if stack:
+        data['pos'].append(np.vstack(data['ep_pos']))
+        data['angle'].append(np.vstack(data['ep_angle']))
+        data['shortcut'].append(data['ep_shortcut'])
+        
+        data['ep_pos'] = []
+        data['ep_angle'] = []        
+        data['ep_shortcut'] = []
+    elif not done[0]:
+        pos = env.get_attr('character')[0].pos.copy()
+        angle = env.get_attr('character')[0].angle
+        data['ep_pos'].append(pos)
+        data['ep_angle'].append(angle)
+    
+    return data
+
 def simple_vec_envs(obs_rms=None, env_name='NavEnv-v0', normalize=True, seed=None, num_processes=1,
              device=torch.device('cpu'), capture_video=False, env_kwargs={},
              aux_wrapper_kwargs={}, eval_log_dir=None):
