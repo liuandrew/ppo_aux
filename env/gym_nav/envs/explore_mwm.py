@@ -217,7 +217,7 @@ class Character:
         end: desired end position (may be stopped earlier if collision occurs)
         col_walls: wall objects that can detect collision
         col_wall_refs: corresponding wall object references
-        '''                
+        '''
         x1 = start[0]
         y1 = start[1]
         x2 = end[0]
@@ -548,7 +548,10 @@ class ExploreMWM(gym.Env):
             observation_width += 2
         if obs_set == 3:
             observation_width += 4
-        #if obs_set == 4:...
+        if obs_set == 4:
+            observation_width += num_grid_slices ** 2
+        if obs_set == 5:
+            observation_width += (num_grid_slices**2) * 2
 
         #For ongoing episode resetting position when goal reached,
         #agent needs to be told when platform is actually reached
@@ -559,7 +562,8 @@ class ExploreMWM(gym.Env):
         
         self.max_steps = max_steps
         self.current_steps = 0
-        
+        self.goal_reached_this_ep = False
+
         self.character = Character(num_rays=self.num_rays, fov=self.fov, one_hot_obs=one_hot_obs)
         self.initial_character_position = self.character.pos.copy()
         self.render_character = render_character
@@ -628,20 +632,7 @@ class ExploreMWM(gym.Env):
             reward += float(dist_to_goal)
             info['bonus_reward'] = float(dist_to_goal)
         if 'explorebonus' in self.rew_structure: 
-            x_grids = np.linspace(0, WINDOW_SIZE[0], self.num_grid_slices+1)
-            y_grids = np.linspace(0, WINDOW_SIZE[1], self.num_grid_slices+1)
-            x = self.character.pos[0]
-            y = self.character.pos[1]
-            x_where = np.argwhere(x < x_grids)
-            y_where = np.argwhere(y < y_grids)
-            if len(x_where) > 0:
-                x_grid = x_where[0] - 1
-            else:
-                x_grid = self.num_grid_slices - 1
-            if len(y_where) > 0:
-                y_grid = y_where[0] - 1
-            else:
-                y_grid = self.num_grid_slices - 1
+            x_grid, y_grid = self.pos_to_grid(self.character.pos, normalized=False)
             
             if self.visited_sections[x_grid, y_grid] == 0:
                 self.visited_sections[x_grid, y_grid] = 1
@@ -695,6 +686,7 @@ class ExploreMWM(gym.Env):
                 reward = float(1)
                 
                 # Record where the agent was
+                self.goal_reached_this_ep = True
                 char_pos = self.character.pos.copy()
                 self.last_goal_pos = char_pos / 300
                 
@@ -753,6 +745,7 @@ class ExploreMWM(gym.Env):
         self.initial_character_position = self.character.pos.copy()
         self.current_steps = 0
         self.total_rewards = 0
+        self.goal_reached_this_ep = False
         
         self.visited_sections = np.zeros((self.num_grid_slices, self.num_grid_slices,))
         self.visited_positions = np.full((self.max_steps + 50, 2), np.inf)
@@ -799,9 +792,23 @@ class ExploreMWM(gym.Env):
             obs = np.append(obs, self.last_goal_pos)
         elif self.obs_set == 3:
             obs = np.append(obs, self.last_goal_pos)
-            
             char_pos = self.character.pos.copy() / 300
             obs = np.append(obs, char_pos)
+        elif self.obs_set == 4:
+            if self.goal_reached_this_ep:
+                goal_grid = self.pos_to_grid(self.last_goal_pos, normalized=True, output_one_hot=True)
+            else:
+                goal_grid = np.zeros(self.num_grid_slices**2)
+            obs = np.append(obs, goal_grid)
+        elif self.obs_set == 5:
+            if self.goal_reached_this_ep:
+                goal_grid = self.pos_to_grid(self.last_goal_pos, normalized=True, output_one_hot=True)
+            else:
+                goal_grid = np.zeros(self.num_grid_slices**2)
+            obs = np.append(obs, goal_grid)
+            char_pos = self.character.pos.copy() / 300
+            char_grid = self.pos_to_grid(self.last_goal_pos, normalized=True, output_one_hot=True)
+            obs = np.append(obs, char_grid)
         
         return obs
         
@@ -914,7 +921,7 @@ class ExploreMWM(gym.Env):
         else:
             wall_thickness = self.wall_thickness
         
-        if type(self.goal_size) == int:
+        if type(self.goal_size) == float or type(self.goal_size) == int:
             goal_size = [self.goal_size, self.goal_size]
         elif type(self.goal_size) == list:
             goal_size = self.goal_size
@@ -959,7 +966,7 @@ class ExploreMWM(gym.Env):
         # to reset character but not end episode after goal found
         searching = True
         goal_center = np.array(self.boxes[-1].center)
-        if type(self.goal_size) == int:
+        if type(self.goal_size) == float or type(self.goal_size) == int:
             goal_size = [self.goal_size, self.goal_size]
         elif type(self.goal_size) == list:
             goal_size = self.goal_size
@@ -1099,7 +1106,38 @@ class ExploreMWM(gym.Env):
         return np.all(pos_diff <= goal_size)
         
         
-        
+    def pos_to_grid(self, pos, normalized=True, output_one_hot=False):
+        '''
+        Convert a position to a square slice of the play area
+        normalized: set to True if the passed pos variable is already normalized to [0, 1]
+        output_one_hot: set to True if we want to return a one_hot encoded array of size (self.num_grid_slices**2)
+        '''
+        x_grids = np.linspace(0, 1, self.num_grid_slices+1)
+        y_grids = np.linspace(0, 1, self.num_grid_slices+1)
+        if not normalized:
+            x = pos[0] / WINDOW_SIZE[0]
+            y = pos[1] / WINDOW_SIZE[1]
+        else:
+            x = pos[0]
+            y = pos[1]
+        x_where = np.argwhere(x < x_grids)
+        y_where = np.argwhere(y < y_grids)
+        if len(x_where) > 0:
+            x_grid = x_where[0][0] - 1
+        else:
+            x_grid = self.num_grid_slices - 1
+        if len(y_where) > 0:
+            y_grid = y_where[0][0] - 1
+        else:
+            y_grid = self.num_grid_slices - 1
+
+        if output_one_hot:
+            one_hot_grid = np.zeros(self.num_grid_slices**2)
+            one_hot_grid[x_grid*5 + y_grid] = 1
+            return one_hot_grid
+        else:
+            return x_grid, y_grid
+                
 
     def seed(self, seed=0):
         np.random.seed(seed)
