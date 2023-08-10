@@ -18,3 +18,5 @@ write_and_test/data/*
 ppo/algo/__pycache__/*
 ppo/__pycache__/*
 __pycache__/*
+
+!write_and_test/video/*

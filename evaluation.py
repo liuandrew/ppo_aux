@@ -9,7 +9,7 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
              device=torch.device('cpu'), ret_info=1, capture_video=False, env_kwargs={}, data_callback=None,
              num_episodes=10, verbose=0, with_activations=False, deterministic=True,
              aux_wrapper_kwargs={}, auxiliary_truth_sizes=[],
-             eval_log_dir=None):
+             eval_log_dir=None, video_folder='./video'):
     '''
     ret_info: level of info that should be tracked and returned
     capture_video: whether video should be captured for episodes
@@ -38,6 +38,7 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
                               None, eval_log_dir, device, True, 
                               capture_video=capture_video, 
                               env_kwargs=env_kwargs, normalize=normalize,
+                              video_folder=video_folder,
                               **aux_wrapper_kwargs)
 
     vec_norm = utils.get_vec_normalize(envs)

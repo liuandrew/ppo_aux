@@ -751,6 +751,8 @@ class ExploreMWM(gym.Env):
         self.visited_positions = np.full((self.max_steps + 50, 2), np.inf)
         self.visited_distanced = np.full((self.max_steps + 50), False)
         self.visited_idx = 0
+        
+        self.last_goal_pos = np.array([0., 0.,])
 
         return observation
 

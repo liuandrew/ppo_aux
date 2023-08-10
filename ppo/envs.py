@@ -35,7 +35,7 @@ except ImportError:
 
 
 def make_env(env_id, seed, rank, log_dir, allow_early_resets, capture_video=False,
-                env_kwargs=None):
+                env_kwargs=None, video_folder='./video'):
     def _thunk():
 
         if env_id.startswith("dm"):
@@ -47,12 +47,12 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, capture_video=Fals
                 env = gym.make(env_id, **env_kwargs)
             else:
                 env = gym.make(env_id)
-
+                
         #Andy: add capture video wrapper
         if capture_video is not False and capture_video != 0 and rank == 0:
             # env = gym.wrappers.Monitor(env, './video', 
-            #     video_callable=lambda t:t%capture_video==0, force=True)
-            env = gym.wrappers.RecordVideo(env, './video',
+            #     video_callable=lambda t:t%capture_video==0, force=True)            
+            env = gym.wrappers.RecordVideo(env, video_folder,
                 episode_trigger=lambda t:t%capture_video==0)
 
         is_atari = hasattr(gym.envs, 'atari') and isinstance(
@@ -106,13 +106,14 @@ def make_vec_envs(env_name,
                   normalize=True,
                   env_kwargs={},
                   auxiliary_tasks=[],
-                  auxiliary_task_args=[]):
+                  auxiliary_task_args=[],
+                  video_folder='./video'):
     if seed is None:
         seed = np.random.randint(0, 1e9)
         
     envs = [
         make_env(env_name, seed, i, log_dir, allow_early_resets, capture_video,
-                env_kwargs)
+            env_kwargs, video_folder)
         for i in range(num_processes)
     ]
 
