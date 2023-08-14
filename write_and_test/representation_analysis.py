@@ -505,7 +505,7 @@ def rasterize_pos(pos, sigma=1):
 
         all_counts.append(row_counts)
 
-    return gaussian_filter(all_counts, 1)
+    return gaussian_filter(all_counts, sigma)
 
 
 '''

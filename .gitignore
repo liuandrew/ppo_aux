@@ -15,8 +15,8 @@ saved_models/*
 write_and_test/.ipynb_checkpoints/*
 write_and_test/__pycache__/*
 write_and_test/data/*
+write_and_test/video/*
 ppo/algo/__pycache__/*
 ppo/__pycache__/*
 __pycache__/*
 
-!write_and_test/video/*

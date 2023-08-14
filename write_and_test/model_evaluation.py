@@ -206,6 +206,32 @@ def load_checkpoint(experiment, trial=None, checkpoint=None, base_folder='../tra
         else:
             return torch.load(path/f'{checkpoint}.pt')
         
+        
+# get checkpoints in folder
+def get_chks(exp_name, trial=None, subdir='shortcut_resets', basedir='../saved_checkpoints'):
+    base = Path(basedir)/subdir
+    if trial is not None:
+        chk_folder = base/f'{exp_name}_t{trial}'
+    else:
+        chk_folder = base/exp_name
+    
+    chks = []
+    for i in chk_folder.iterdir():
+        chks.append(int(i.name.split('.pt')[0]))
+    chks = np.sort(chks)
+    return chks
+
+def load_chk(exp_name, chk, trial=None, subdir='shortcut_resets', basedir='../saved_checkpoints'):
+    base = Path(basedir)/subdir
+    if trial is not None:
+        chk_folder = base/f'{exp_name}_t{trial}'
+    else:
+        chk_folder = base/exp_name
+
+    model_path = chk_folder/f'{chk}.pt'
+    model, obs_rms = torch.load(model_path)
+    
+    return model, obs_rms
     
 
 

@@ -413,7 +413,7 @@ class ExploreMWM(gym.Env):
                 poster_thickness=None,
                 render_character=True, wall_thickness=None,
                 one_hot_obs=True, bonus_multiplier=5, explore_punish_arg=5,
-                obs_set=1):
+                obs_set=1, give_last_action=False):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
@@ -466,7 +466,8 @@ class ExploreMWM(gym.Env):
         wall_thickness: if given a value, set wall thickness to that value
         one_hot_obs: wheter to set colors to be a one-hot encoded vector
             If False, colors are evenly spaced float values between 0 and 1, spaced by 7 possible values
-            
+        give_last_action: whether to give the last action (self-locomotion data)
+        
         obs_set:
             1: Only vision and note when goal is reached
             2: Vision + position of goal when reached
@@ -496,6 +497,7 @@ class ExploreMWM(gym.Env):
         self.give_dist = give_dist
         self.give_heading = give_heading
         self.give_time = give_time
+        self.give_last_action = give_last_action
         self.sub_goal_reward = sub_goal_reward
         self.rew_structure = rew_structure
         self.verbose = verbose
@@ -518,6 +520,7 @@ class ExploreMWM(gym.Env):
         self.num_grid_slices = num_grid_slices
         self.target_grid = 0
         self.last_reward = 0
+        self.last_action = None
         self.poster_thickness = poster_thickness
         self.wall_thickness = wall_thickness
         
@@ -543,6 +546,8 @@ class ExploreMWM(gym.Env):
             observation_width += 1
         if give_time:
             observation_width += 1
+        if give_last_action:
+            observation_width += num_actions
             
         if obs_set == 2:
             observation_width += 2
@@ -599,6 +604,7 @@ class ExploreMWM(gym.Env):
                             self.col_walls, self.col_wall_refs)
         
     def step(self, action):
+        self.last_action = action
         reward = self.default_reward
         collision_obj = None
         done = False
@@ -739,6 +745,7 @@ class ExploreMWM(gym.Env):
             self.character.pos = start_point.copy()
         if start_angle is not None:
             self.character.angle = start_angle
+        self.last_action = None
         
         self.character.update_rays()
         observation = self.get_observation()
@@ -787,7 +794,15 @@ class ExploreMWM(gym.Env):
         obs = self.character.ray_obs()
         if not self.give_dist:
             obs = obs[:self.num_rays]
-        obs = np.append(obs, [0.])
+        # add a flag to indicate whether goal was reached this step
+        # the step() function will change this to a 1 if needed
+        obs = np.append(obs, [0.]) 
+        
+        if self.give_last_action:
+            action_one_hot = np.zeros(self.num_actions)
+            if self.last_action is not None:
+                action_one_hot[self.last_action] = 1
+            obs = np.append(obs, action_one_hot)
         
         if self.obs_set == 2:
             # last_goal_pos will be a 2D array of position of goal when reached
