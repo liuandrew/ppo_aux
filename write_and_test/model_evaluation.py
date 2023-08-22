@@ -281,17 +281,15 @@ def evalu(model, obs_rms, n=100, env_name='NavEnv-v0', env_kwargs={},
     return results
 
 
-
-def forced_action_evaluate(actor_critic, obs_rms, env_name='NavEnv-v0', forced_actions=None, seed=0, num_processes=1, eval_log_dir='/tmp/gym/_eval/',
+    
+    
+def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_actions=None,
+            env_name='NavEnv-v0', seed=None, num_processes=1,
              device=torch.device('cpu'), ret_info=1, capture_video=False, env_kwargs={}, data_callback=None,
-             num_episodes=10, verbose=0, with_activations=False):
+             num_episodes=10, verbose=0, with_activations=False, deterministic=True,
+             aux_wrapper_kwargs={}, auxiliary_truth_sizes=[],
+             eval_log_dir=None, video_folder='./video'):
     '''
-    forced_actions: pass something to tell the function what forced actions to use
-        int or float: use the same action every step
-        function or lambda: function will be called at every step with the current step number
-            (function doesn't need to use this information, but needs to be able to take the positional parameter)
-            function should return int or float
-        list or np.ndarray: could be implemented
     ret_info: level of info that should be tracked and returned
     capture_video: whether video should be captured for episodes
     env_kwargs: any kwargs to create environment with
@@ -312,12 +310,17 @@ def forced_action_evaluate(actor_critic, obs_rms, env_name='NavEnv-v0', forced_a
         see below at example_data_callback in this file for an example
     '''
 
-    eval_envs = make_vec_envs(env_name, seed + num_processes, num_processes,
+    if seed is None:
+        seed = np.random.randint(0, 1e9)
+
+    envs = make_vec_envs(env_name, seed + num_processes, num_processes,
                               None, eval_log_dir, device, True, 
                               capture_video=capture_video, 
-                              env_kwargs=env_kwargs)
+                              env_kwargs=env_kwargs, normalize=normalize,
+                              video_folder=video_folder,
+                              **aux_wrapper_kwargs)
 
-    vec_norm = utils.get_vec_normalize(eval_envs)
+    vec_norm = utils.get_vec_normalize(envs)
     if vec_norm is not None:
         vec_norm.eval()
         vec_norm.obs_rms = obs_rms
@@ -327,69 +330,147 @@ def forced_action_evaluate(actor_critic, obs_rms, env_name='NavEnv-v0', forced_a
     all_obs = []
     all_actions = []
     all_rewards = []
-    all_hidden_states = []
+    all_rnn_hxs = []
     all_dones = []
     all_masks = []
     all_activations = []
+    all_values = []
+    all_actor_features = []
+    all_auxiliary_preds = []
+    all_auxiliary_truths = []
     data = {}
+    
+    ep_obs = []
+    ep_actions = []
+    ep_rewards = []
+    ep_rnn_hxs = []
+    ep_dones = []
+    ep_values = []
+    ep_masks = []
+    ep_actor_features = []
+    
+    ep_auxiliary_preds = []
+    ep_activations = []
+    ep_auxiliary_truths = []
+    
 
-    obs = eval_envs.reset()
-    eval_recurrent_hidden_states = torch.zeros(
+    obs = envs.reset()
+    rnn_hxs = torch.zeros(
         num_processes, actor_critic.recurrent_hidden_state_size, device=device)
-    eval_masks = torch.zeros(num_processes, 1, device=device)
+    masks = torch.zeros(num_processes, 1, device=device)
 
-    step = 0
-    while len(eval_episode_rewards) < num_episodes:
-        with torch.no_grad():
-            outputs = actor_critic.act(obs, eval_recurrent_hidden_states, 
-                                       eval_masks, deterministic=True,
-                                       with_activations=with_activations)
+    for i in range(num_episodes):
+        step = 0
+        while True:
+            ep_obs.append(obs)
+            ep_rnn_hxs.append(rnn_hxs)
+            if data_callback is not None and step == 0:
+                data = data_callback(None, envs, rnn_hxs,
+                    obs, [], [], [False], data, first=True)
+
+            with torch.no_grad():
+                outputs = actor_critic.act(obs, rnn_hxs, 
+                                        masks, deterministic=deterministic,
+                                        with_activations=with_activations)
+                if forced_actions is None:
+                    action = outputs['action']
+                elif type(forced_actions) in [int, float]:
+                    action = torch.full((num_processes, 1), forced_actions)
+                elif type(forced_actions) in [list, np.ndarray]:
+                    action = torch.full((num_processes, 1), forced_actions[step])
+                elif type(forced_actions) == type(lambda:0):
+                    actions = [torch.tensor(forced_actions(step)) for i in range(num_processes)]
+                    action = torch.vstack(actions) 
+                            
+                rnn_hxs = outputs['rnn_hxs']
+            obs, reward, done, infos = envs.step(action)
             
-            if forced_actions is None:
-                action = outputs['action']
-            elif type(forced_actions) in [int, float]:
-                action = torch.full((num_processes, 1), forced_actions)
-            elif type(forced_actions) == type(lambda:0):
-                actions = [torch.tensor(forced_actions(step)) for i in range(num_processes)]
-                action = torch.vstack(actions)            
+            masks = torch.tensor(
+                [[0.0] if done_ else [1.0] for done_ in done],
+                dtype=torch.float32,
+                device=device)
             
-            eval_recurrent_hidden_states = outputs['rnn_hxs']
+            ep_actions.append(action)
+            ep_rewards.append(reward)
+            ep_dones.append(done)
+            ep_values.append(outputs['value'])
+            ep_masks.append(masks)
+            ep_actor_features.append(outputs['actor_features'])
             
-        # Obser reward and next obs
-        obs, reward, done, infos = eval_envs.step(action)
-        
-        eval_masks = torch.tensor(
-            [[0.0] if done_ else [1.0] for done_ in done],
-            dtype=torch.float32,
-            device=device)
+            if 'auxiliary_preds' in outputs:
+                ep_auxiliary_preds.append(outputs['auxiliary_preds'])
+            
+            if with_activations:
+                ep_activations.append(outputs['activations'])
 
-        all_obs.append(obs)
-        all_actions.append(action)
-        all_rewards.append(reward)
-        all_hidden_states.append(eval_recurrent_hidden_states)
-        all_dones.append(done)
-        all_masks.append(eval_masks)
-        
-        if with_activations:
-            all_activations.append(outputs['activations'])
+            if data_callback is not None:
+                data = data_callback(None, envs, rnn_hxs,
+                    obs, action, reward, done, data)
+            else:
+                data = {}
+                
+            auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
+            for info in infos:
+                if 'auxiliary' in info and len(info['auxiliary']) > 0:
+                    for i, aux in enumerate(info['auxiliary']):
+                        auxiliary_truths[i].append(aux)
+            if len(auxiliary_truths) > 0:
+                auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
+            ep_auxiliary_truths.append(auxiliary_truths)
+            
+            
+            # for info in infos:
+            #     if 'episode' in info.keys():
+            #         eval_episode_rewards.append(info['episode']['r'])
+            #         #Andy: add verbosity option
+            #         if verbose >= 2:
+            #             print('ep ' + str(len(eval_episode_rewards)) + ' rew ' + \
+            #                 str(info['episode']['r']))
+            
+            step += 1
+            
+            if done[0]:
+                all_obs.append(np.vstack(ep_obs))
+                all_actions.append(np.vstack(ep_actions))
+                all_rewards.append(np.vstack(ep_rewards))
+                all_rnn_hxs.append(np.vstack(ep_rnn_hxs))
+                all_dones.append(np.vstack(ep_dones))
+                all_masks.append(np.vstack(ep_masks))
+                all_values.append(np.vstack(ep_values))
+                all_actor_features.append(np.vstack(ep_actor_features))
+                
+                all_auxiliary_preds.append(ep_auxiliary_preds)
+                all_activations.append(ep_activations)
+                all_auxiliary_truths.append(ep_auxiliary_truths)
 
-        if data_callback is not None:
-            data = data_callback(actor_critic, eval_envs, eval_recurrent_hidden_states,
-                obs, action, reward, done, data)
-        else:
-            data = {}
-
-        for info in infos:
-            if 'episode' in info.keys():
-                eval_episode_rewards.append(info['episode']['r'])
-                #Andy: add verbosity option
+                if data_callback is not None:
+                    data = data_callback(None, envs, rnn_hxs,
+                        obs, action, reward, done, data, stack=True)
+                          
                 if verbose >= 2:
-                    print('ep ' + str(len(eval_episode_rewards)) + ' rew ' + \
-                        str(info['episode']['r']))
-        
-        step += 1
+                    print(f'ep {i}, rew {np.sum(ep_rewards)}' )
+                    
+                ep_obs = []
+                ep_actions = []
+                ep_rewards = []
+                ep_rnn_hxs = []
+                ep_dones = []
+                ep_values = []
+                ep_masks = []
+                ep_actor_features = []
+                
+                ep_auxiliary_preds = []
+                ep_activations = []
+                ep_auxiliary_truths = []
+                
+                step = 0
+                
+                break
+            
+            
+  
 
-    # eval_envs.close()
+    envs.close()
     if verbose >= 1:
         print(" Evaluation using {} episodes: mean reward {:.5f}\n".format(
             len(eval_episode_rewards), np.mean(eval_episode_rewards)))
@@ -398,14 +479,17 @@ def forced_action_evaluate(actor_critic, obs_rms, env_name='NavEnv-v0', forced_a
         'obs': all_obs,
         'actions': all_actions,
         'rewards': all_rewards,
-        'hidden_states': all_hidden_states,
+        'rnn_hxs': all_rnn_hxs,
         'dones': all_dones,
         'masks': all_masks,
-        'envs': eval_envs,
+        'envs': envs,
         'data': data,
         'activations': all_activations,
+        'values': all_values,
+        'actor_features': all_actor_features,
+        'auxiliary_preds': all_auxiliary_preds,
+        'auxiliary_truths': all_auxiliary_truths,
     }
-    
     
     
 def get_ep(data, ep_ends, ep_num=0):

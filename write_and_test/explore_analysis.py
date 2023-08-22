@@ -98,13 +98,17 @@ def compute_eps_search_efficiency(all_pos, all_rew, ret_trials=False):
         return mean_eff, std_eff
     
     
-def test_search_efficiency(model, obs_rms, test_set=2, env_kwargs={}, ret_res=False,
-                          manual_starts=None, with_activations=True):
+def test_search_efficiency(model, obs_rms, test_set=2, env_kwargs={}, ret_res=True,
+                          manual_starts=None, forced_actions=None, with_activations=True):
     '''
     Test an agent's exploring efficiency given fixed starting points
     
-    env_kwargs: extra arguments to give
+    env_kwargs: extra arguments to give. Note: these overwrite the kw appended, which are
+        'goal_size' and 'fixed_reset', so ideally do not have these as part of passed env_kwargs
     manual_starts: option to pass [reset_points, reset_angles] to use manually
+    
+    forced_actions: optional list of actions. Should have same number of episode actions
+        as number of start pointsx
     '''
     if test_set == 0:
         reset_points = [np.array([150., 150.])]
@@ -135,23 +139,26 @@ def test_search_efficiency(model, obs_rms, test_set=2, env_kwargs={}, ret_res=Fa
     effs = []
     trajs = []
     ress = []
-    for point, angle in zip(reset_points, reset_angles):
-        kw = {'goal_size': 1e-8, 'fixed_reset': [point, angle],
-          'max_steps': 500}
+    for i, (point, angle) in enumerate(zip(reset_points, reset_angles)):
+        kw = {'goal_size': 1e-8, 'fixed_reset': [point, angle]}
         for k in env_kwargs:
             kw[k] = env_kwargs[k]
-            
-        res = evaluate(model, obs_rms, env_kwargs=kw,
-                       env_name='ExploreNav-v0', num_episodes=1, 
-                       data_callback=explore_data_callback, with_activations=with_activations)
+        
+        if forced_actions is not None:
+            res = forced_action_evaluate(model, obs_rms, env_kwargs=kw,
+                        env_name='ExploreNav-v0', num_episodes=1, forced_actions=forced_actions[i],
+                        data_callback=explore_data_callback, with_activations=with_activations)
+        else:
+            res = evaluate(model, obs_rms, env_kwargs=kw,
+                        env_name='ExploreNav-v0', num_episodes=1, 
+                        data_callback=explore_data_callback, with_activations=with_activations)
+
         eff, _ = compute_eps_search_efficiency(res['data']['pos'], res['rewards'])
         effs.append(eff)
         trajs.append((res['data']['pos'][0], res['data']['angle'][0]))
         ress.append(res)
         
-    if ret_res:
-        return effs, trajs, ress
-    return effs, trajs
+    return effs, trajs, ress
 
     
 

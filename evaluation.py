@@ -176,6 +176,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
                 ep_activations = []
                 ep_auxiliary_truths = []
                 
+                step = 0
+                
                 break
             
             

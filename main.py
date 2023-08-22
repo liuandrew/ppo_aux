@@ -190,6 +190,7 @@ def main():
     rollouts.to(device)
 
     episode_rewards = deque(maxlen=10)
+    ep_bonus_reward = [0]*args.num_processes
 
     start = time.time()
     #Andy: add global step
@@ -235,15 +236,18 @@ def main():
             obs, reward, done, infos = envs.step(action)
             
             auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
-            for info in infos:
+            for n, info in enumerate(infos):
+                if 'bonus_reward' in info:
+                    ep_bonus_reward[n] += info['bonus_reward']
                 if 'auxiliary' in info and len(info['auxiliary']) > 0:
                     for i, aux in enumerate(info['auxiliary']):
                         auxiliary_truths[i].append(aux)
             if len(auxiliary_truths) > 0:
                 auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
             
-            for info in infos:
+            for n, info in enumerate(infos):
                 if 'episode' in info.keys():
+                    # This marks episode done, record to writer
                     episode_rewards.append(info['episode']['r'])
                     print(f'global_step={global_step}')
                     # Andy: add tensorboard writing episode returns
@@ -251,6 +255,9 @@ def main():
                         global_step)
                     writer.add_scalar("charts/episodic_length", info["episode"]["l"], 
                         global_step)
+                    writer.add_scalar("charts/episodic_bonus_rewards", ep_bonus_reward[n])
+                    
+                    ep_bonus_reward[n] = 0
 
 
 
