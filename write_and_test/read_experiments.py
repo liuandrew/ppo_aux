@@ -284,6 +284,7 @@ def average_runs(trial_name, metric='return', ax=None, ret=False, ewm=0.01,
     trial_name: Name of experiment, 
     metric: Name of metric to plot, some shortcuts can be passed like
         value_loss, policy_loss, return, length
+        pure_goal: special metric that subtracts bonus from rewards
     ax: Optionally pass ax to plot on
     ewm: whether to do an exponential average of metric
         if not wanted, pass False
@@ -369,10 +370,19 @@ def average_runs(trial_name, metric='return', ax=None, ret=False, ewm=0.01,
             if verbose:
                 print(str(exp))
             df = load_exp_df(path=str(exp))
-            df = df[df['metric'] == metric]
-            if len(df) < 1:
-                raise Exception('No metric called {} found in {}'.format(
-                    metric, exp))
+            
+            if metric == 'pure_goal':
+                d1 = df[df['metric'] == 'charts/episodic_return']
+                d2 = df[df['metric'] == 'charts/episodic_bonus_rewards']
+                d1 = d1.reset_index()
+                d2 = d2.reset_index()
+                d1['value'] = d1['value'] - d2['value']
+                df = d1                
+            else:
+                df = df[df['metric'] == metric]
+                if len(df) < 1:
+                    raise Exception('No metric called {} found in {}'.format(
+                        metric, exp))
             
             first_xs.append(df.iloc[0]['step'])
             last_xs.append(df.iloc[-1]['step'])

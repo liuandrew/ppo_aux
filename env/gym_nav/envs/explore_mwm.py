@@ -471,6 +471,8 @@ class ExploreMWM(gym.Env):
         obs_set:
             1: Only vision and note when goal is reached
             2: Vision + position of goal when reached
+                2b: Vision + position of agent
+                2c: Vision + position of agent from previous time step
             3: Vision + position of goal when reached + position of agent
             To be implemented:
             4: Vision + position of goal as grid one-hot
@@ -514,6 +516,7 @@ class ExploreMWM(gym.Env):
             fixed_reset[0] = np.array(fixed_reset[0])
         self.fixed_reset = fixed_reset
         self.character_reset_pos = character_reset_pos
+        self.character_last_pos = np.array([0., 0.])
         self.turn_speed = turn_speed
         self.move_speed = move_speed
         self.num_actions = num_actions
@@ -549,7 +552,7 @@ class ExploreMWM(gym.Env):
         if give_last_action:
             observation_width += num_actions
             
-        if obs_set == 2:
+        if obs_set == 2 or obs_set == '2b' or obs_set == '2c':
             observation_width += 2
         if obs_set == 3:
             observation_width += 4
@@ -625,8 +628,7 @@ class ExploreMWM(gym.Env):
         #         reward = float(1)
         #         done = True
 
-        if self.rew_structure != 'goal':
-            info['bonus_reward'] = 0
+        info['bonus_reward'] = 0
         if self.rew_structure == 'dist':
             goal = self.boxes[-1]
             dist_to_goal = self.sub_goal_reward * \
@@ -714,6 +716,9 @@ class ExploreMWM(gym.Env):
         auxiliary_output = self.get_auxiliary_output()
         info['auxiliary'] = auxiliary_output
         
+        char_pos = self.character.pos.copy() / 300
+        self.character_last_pos = char_pos
+        
         if collision_obj != None and collision_obj.is_goal:
             # Tell the agent the goal was reached
             observation[self.ray_obs_width] = 1
@@ -760,6 +765,7 @@ class ExploreMWM(gym.Env):
         self.visited_idx = 0
         
         self.last_goal_pos = np.array([0., 0.,])
+        self.character_last_pos = np.array([0., 0.])
 
         return observation
 
@@ -805,9 +811,18 @@ class ExploreMWM(gym.Env):
             obs = np.append(obs, action_one_hot)
         
         if self.obs_set == 2:
+            # Vision + last goal pos
             # last_goal_pos will be a 2D array of position of goal when reached
             obs = np.append(obs, self.last_goal_pos)
+        if self.obs_set == '2b':
+            # Vision + current agent pos
+            char_pos = self.character.pos.copy() / 300
+            obs = np.append(obs, char_pos)
+        if self.obs_set == '2c':
+            # Vision + agent pos at previous time step
+            obs = np.append(obs, self.character_last_pos)
         elif self.obs_set == 3:
+            # Vision + last goal pos + current agent pos
             obs = np.append(obs, self.last_goal_pos)
             char_pos = self.character.pos.copy() / 300
             obs = np.append(obs, char_pos)

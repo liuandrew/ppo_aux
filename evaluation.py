@@ -257,6 +257,11 @@ def explore_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, 
         data['ep_angle'] = []
     if 'ep_goal' not in data:
         data['ep_goal'] = []
+        
+    if 'goal_reached' not in data:
+        data['goal_reached'] = []
+    if 'ep_goal_reached' not in data:
+        data['ep_goal_reached'] = []
 
     if first:
         data['ep_goal'].append(env.envs[0].boxes[-1].corner)
@@ -265,15 +270,19 @@ def explore_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, 
         data['pos'].append(np.vstack(data['ep_pos']))
         data['angle'].append(np.vstack(data['ep_angle']))
         data['goal'].append(data['ep_goal'])
+        data['goal_reached'].append(data['ep_goal_reached'])
         
         data['ep_pos'] = []
         data['ep_angle'] = []        
         data['ep_goal'] = []
+        data['ep_goal_reached'] = []
     elif not done[0]:
         pos = env.get_attr('character')[0].pos.copy()
         angle = env.get_attr('character')[0].angle
+        goal_reached = env.get_attr('goal_reached_this_ep')[0]
         data['ep_pos'].append(pos)
         data['ep_angle'].append(angle)
+        data['ep_goal_reached'].append(goal_reached)
     
     return data
 
