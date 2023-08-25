@@ -413,7 +413,7 @@ class ExploreMWM(gym.Env):
                 poster_thickness=None,
                 render_character=True, wall_thickness=None,
                 one_hot_obs=True, bonus_multiplier=5, explore_punish_arg=5,
-                obs_set=1, give_last_action=False):
+                obs_set=1, obs_set_arg=0, give_last_action=False):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
@@ -473,10 +473,14 @@ class ExploreMWM(gym.Env):
             2: Vision + position of goal when reached
                 2b: Vision + position of agent
                 2c: Vision + position of agent from previous time step
+                2d: Vision + position of goal for a number of time steps
             3: Vision + position of goal when reached + position of agent
             To be implemented:
             4: Vision + position of goal as grid one-hot
             5: Vision + position of goal + position of agent as one-hot
+            
+        obs_set_arg:
+            Used for 2d to set how many steps the goal stays in observation for
         '''
         super(ExploreMWM, self).__init__()
 
@@ -537,6 +541,8 @@ class ExploreMWM(gym.Env):
         self.one_hot_obs = one_hot_obs
         
         self.obs_set = obs_set
+        self.obs_set_arg = obs_set_arg
+        self.steps_since_goal = 0
         self.last_goal_pos = np.array([0., 0.,])
         
         if self.one_hot_obs:
@@ -552,7 +558,7 @@ class ExploreMWM(gym.Env):
         if give_last_action:
             observation_width += num_actions
             
-        if obs_set == 2 or obs_set == '2b' or obs_set == '2c':
+        if obs_set == 2 or obs_set == '2b' or obs_set == '2c' or obs_set == '2d':
             observation_width += 2
         if obs_set == 3:
             observation_width += 4
@@ -697,7 +703,7 @@ class ExploreMWM(gym.Env):
                 self.goal_reached_this_ep = True
                 char_pos = self.character.pos.copy()
                 self.last_goal_pos = char_pos / 300
-                
+                self.steps_since_goal = 0
                 self.reset_character_position()
                 
                 # Reseet tracking of visited locations
@@ -709,7 +715,7 @@ class ExploreMWM(gym.Env):
 #                 reward = -10
                 # reward += float(self.collission_penalty)
                 pass
-                            
+        
         self.last_reward = reward
         observation = self.get_observation()
         
@@ -727,6 +733,7 @@ class ExploreMWM(gym.Env):
             done = True
         
         self.current_steps += 1
+        self.steps_since_goal += 1
         self.total_rewards += reward
         if done and self.verbose:
             print('done, total_reward:{}'.format(self.total_rewards))
@@ -752,11 +759,10 @@ class ExploreMWM(gym.Env):
             self.character.angle = start_angle
         self.last_action = None
         
-        self.character.update_rays()
-        observation = self.get_observation()
         self.initial_character_position = self.character.pos.copy()
         self.current_steps = 0
         self.total_rewards = 0
+        self.steps_since_goal = 0
         self.goal_reached_this_ep = False
         
         self.visited_sections = np.zeros((self.num_grid_slices, self.num_grid_slices,))
@@ -766,6 +772,9 @@ class ExploreMWM(gym.Env):
         
         self.last_goal_pos = np.array([0., 0.,])
         self.character_last_pos = np.array([0., 0.])
+
+        self.character.update_rays()
+        observation = self.get_observation()
 
         return observation
 
@@ -821,6 +830,12 @@ class ExploreMWM(gym.Env):
         if self.obs_set == '2c':
             # Vision + agent pos at previous time step
             obs = np.append(obs, self.character_last_pos)
+        if self.obs_set == '2d':
+            # Vision + last goal pos. Information stays for obs_set_arg number of steps
+            if self.steps_since_goal < self.obs_set_arg:
+                obs = np.append(obs, self.last_goal_pos)
+            else:
+                obs = np.append(obs, np.array([0., 0.]))
         elif self.obs_set == 3:
             # Vision + last goal pos + current agent pos
             obs = np.append(obs, self.last_goal_pos)
