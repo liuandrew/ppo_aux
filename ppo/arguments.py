@@ -205,6 +205,8 @@ def get_args():
     parser.add_argument('--remove-actor-grads-on-shared', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True,
         help='if toggled, only use value grads for shared layers')
 
+    parser.add_argument('--use-universal-step', nargs='*', action=ParseKwargs, default={'on': False},
+        help='pass a dict with a [schedule] key to show when manual resets to update universal step should occur')
 
     args = parser.parse_args()
 

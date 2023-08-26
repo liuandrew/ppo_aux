@@ -191,6 +191,8 @@ def main():
 
     episode_rewards = deque(maxlen=10)
     ep_bonus_reward = [0]*args.num_processes
+    
+    universal_step_reset_point = 0
 
     start = time.time()
     #Andy: add global step
@@ -202,6 +204,20 @@ def main():
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes
     for j in range(num_updates):
+        
+        if args.use_universal_step['on']:
+            print('Updating universal step schedule')
+            schedule = np.array(args.use_universal_step['schedule'])
+            b = np.argwhere(global_step >= schedule).reshape(-1)
+            if len(b) == 0:
+                idx = None
+            else:
+                idx = b[-1]
+            if idx > universal_step_reset_point:
+                # perform reset 
+                universal_step_reset_point = idx
+                envs.env_method('set_universal_step', global_step)            
+
 
         if args.use_linear_lr_decay:
             # decrease learning rate linearly

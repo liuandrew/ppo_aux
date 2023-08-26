@@ -474,13 +474,15 @@ class ExploreMWM(gym.Env):
                 2b: Vision + position of agent
                 2c: Vision + position of agent from previous time step
                 2d: Vision + position of goal for a number of time steps
+                2e: Vision + position of goal for a number of time steps on a schedule
             3: Vision + position of goal when reached + position of agent
             To be implemented:
             4: Vision + position of goal as grid one-hot
             5: Vision + position of goal + position of agent as one-hot
             
         obs_set_arg:
-            Used for 2d to set how many steps the goal stays in observation for
+            2d: pass an int representing how many timesteps to give goal pos for
+            2e: pass [[num_steps_goal_given], [step_schedule]] to give schedule of 2d type behavior
         '''
         super(ExploreMWM, self).__init__()
 
@@ -544,6 +546,7 @@ class ExploreMWM(gym.Env):
         self.obs_set_arg = obs_set_arg
         self.steps_since_goal = 0
         self.last_goal_pos = np.array([0., 0.,])
+        self.universal_step = None
         
         if self.one_hot_obs:
             observation_width = num_rays * 6
@@ -558,7 +561,7 @@ class ExploreMWM(gym.Env):
         if give_last_action:
             observation_width += num_actions
             
-        if obs_set == 2 or obs_set == '2b' or obs_set == '2c' or obs_set == '2d':
+        if obs_set == 2 or obs_set == '2b' or obs_set == '2c' or obs_set == '2d' or obs_set == '2e':
             observation_width += 2
         if obs_set == 3:
             observation_width += 4
@@ -611,8 +614,12 @@ class ExploreMWM(gym.Env):
         # New Character class: need to pass walls
         self.character.update_walls(self.vis_walls, self.vis_wall_refs,
                             self.col_walls, self.col_wall_refs)
-        
+    
+    
     def step(self, action):
+        '''
+        universal_step: Used to pass the current step count of the whole training process if needed for scheduling purposes
+        '''
         self.last_action = action
         reward = self.default_reward
         collision_obj = None
@@ -740,7 +747,7 @@ class ExploreMWM(gym.Env):
         return observation, reward, done, info
     
 
-    def reset(self):
+    def reset(self, universal_step=None):
         """
         start_point (numpy array, optional): Set the starting point
             of the agent
@@ -772,6 +779,8 @@ class ExploreMWM(gym.Env):
         
         self.last_goal_pos = np.array([0., 0.,])
         self.character_last_pos = np.array([0., 0.])
+        if universal_step != None:
+            self.universal_step = universal_step
 
         self.character.update_rays()
         observation = self.get_observation()
@@ -823,19 +832,35 @@ class ExploreMWM(gym.Env):
             # Vision + last goal pos
             # last_goal_pos will be a 2D array of position of goal when reached
             obs = np.append(obs, self.last_goal_pos)
-        if self.obs_set == '2b':
+        elif self.obs_set == '2b':
             # Vision + current agent pos
             char_pos = self.character.pos.copy() / 300
             obs = np.append(obs, char_pos)
-        if self.obs_set == '2c':
+        elif self.obs_set == '2c':
             # Vision + agent pos at previous time step
             obs = np.append(obs, self.character_last_pos)
-        if self.obs_set == '2d':
+        elif self.obs_set == '2d':
             # Vision + last goal pos. Information stays for obs_set_arg number of steps
             if self.steps_since_goal < self.obs_set_arg:
                 obs = np.append(obs, self.last_goal_pos)
             else:
                 obs = np.append(obs, np.array([0., 0.]))
+        elif self.obs_set == '2e':
+            schedule = np.array(self.obs_set_arg[1])
+            ustep = 0
+            if self.universal_step != None:
+                ustep = self.universal_step
+            b = np.argwhere(ustep >= schedule).reshape(-1)
+            if len(b) == 0:
+                idx = 0
+            else:
+                idx = b[-1]
+            give_goal_step_limit = self.obs_set_arg[0][idx]
+            if self.steps_since_goal < give_goal_step_limit:
+                obs = np.append(obs, self.last_goal_pos)
+            else:
+                obs = np.append(obs, np.array([0., 0.]))
+            # obs = np.append(obs, np.array([ustep, idx]))
         elif self.obs_set == 3:
             # Vision + last goal pos + current agent pos
             obs = np.append(obs, self.last_goal_pos)
@@ -1189,3 +1214,5 @@ class ExploreMWM(gym.Env):
     def seed(self, seed=0):
         np.random.seed(seed)
 
+    def set_universal_step(self, universal_step):
+        self.universal_step = universal_step

@@ -1,3 +1,6 @@
+import numpy as np
+from evaluation import *
+
 turn_speed = 0.3
 move_speed = 10
 
