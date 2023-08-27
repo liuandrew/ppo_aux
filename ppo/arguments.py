@@ -168,6 +168,8 @@ def get_args():
                         help='if toggled, turn off normalization in environment wrapper')
     parser.add_argument('--cont', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True,
         help='if toggled, attempt to load a model as named from save_path under the right folder to continue experiment')
+    parser.add_argument('--cont-file-name', type=str, default=None,
+        help='if given, try to load a specific file')
 
 
     

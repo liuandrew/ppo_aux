@@ -120,7 +120,11 @@ def main():
     #Andy: for continuing an experiment, args.cont is True
     if args.cont:
         loaded_model = True
-        actor_critic, obs_rms = torch.load(save_path)
+        if args.cont_file_name is not None:
+            print('Loading', args.cont_file_name)
+            actor_critic, obs_rms = torch.load(args.cont_file_name)
+        else:
+            actor_critic, obs_rms = torch.load(save_path)
     
     if not loaded_model:
         actor_critic = Policy(
@@ -193,20 +197,22 @@ def main():
     ep_bonus_reward = [0]*args.num_processes
     
     universal_step_reset_point = 0
-
+    start_update_step = 0
+    
     start = time.time()
     #Andy: add global step
     if args.cont:
         global_step = int(obs_rms.count)
+        start_update_step = int(obs_rms.count / (args.num_steps * args.num_processes))
+        print('Continuing from update step', start_update_step)
     else:
         global_step = 0
     # print(global_step)
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes
-    for j in range(num_updates):
+    for j in range(start_update_step, num_updates):
         
         if args.use_universal_step['on']:
-            print('Updating universal step schedule')
             schedule = np.array(args.use_universal_step['schedule'])
             b = np.argwhere(global_step >= schedule).reshape(-1)
             if len(b) == 0:
