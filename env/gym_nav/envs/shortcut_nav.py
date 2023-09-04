@@ -419,7 +419,8 @@ class ShortcutNavEnv(gym.Env):
                 num_actions=4, num_grid_slices=5, goal_size=25, goal_corner=None,
                 separate_aux_tasks=False, poster_thickness=None,
                 render_character=True, wall_thickness=None,
-                one_hot_obs=True, shortcut_probability=0.2):
+                one_hot_obs=True, shortcut_probability=0.2,
+                wall_colors=4, shortcut_config=1):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
@@ -433,9 +434,13 @@ class ShortcutNavEnv(gym.Env):
             The character will be passed as the argument
         wall_colors: 
             1: red, red, red, red
-            2: red, green, red, green
-            2.5: red, red, green, green
+            1.5: white, white, white, white (matching shortcut wall)
             4: red, green, blue, purple
+            
+        shortcut_config:
+            1: 1 standard shortcut
+            2: 2 shortcuts where shortcuts are farther from respective entrances
+            2.5: 2 shortcuts where shortcuts are closer to respective entrances
         task_structure:
             1: visible goal, randomize position
             2: invisible goal, fixed position
@@ -528,6 +533,8 @@ class ShortcutNavEnv(gym.Env):
         self.poster_thickness = poster_thickness
         self.wall_thickness = wall_thickness
         self.shortcut_probability = shortcut_probability
+        self.wall_colors = wall_colors
+        self.shortcut_config = shortcut_config
         
         observation_width = num_rays
         self.ray_obs_width = num_rays
@@ -983,12 +990,21 @@ class ShortcutNavEnv(gym.Env):
         else:
             goal_size = [20, 20]
                     
-        if np.random.random() < self.shortcut_probability:
-            make_shortwall = False
-        else:
-            make_shortwall = True
+        
+        if self.shortcut_config in [1]:
+            num_shortcuts = 1
+        elif self.shortcut_config in [2, 2.5]:
+            num_shortcuts = 2
+            
+        make_shortwall = []
+        for i in range(num_shortcuts):
+            if np.random.random() < self.shortcut_probability:
+                make_shortwall.append(False)
+            else:
+                make_shortwall.append(True)
         self.boxes, walls, wall_refs = self.make_walls(thickness=wall_thickness, with_shortwall=make_shortwall)
-
+                
+            
         if self.task_structure == 1:
             #generate a visible goal with random position
             corner = np.random.uniform(low=30, high=270, size=(2,))
@@ -1066,7 +1082,11 @@ class ShortcutNavEnv(gym.Env):
         elif self.character_reset_pos == 3:
             # below shortcut wall, facing anywhere
             pos_x = np.random.uniform(10, 290)
-            pos_y = np.random.uniform(10, 240)
+            
+            if self.num_shortcuts == 1:
+                pos_y = np.random.uniform(10, 240)
+            elif self.num_shortcuts == 2:
+                pos_y = np.random.uniform(10, 190)
             pos = np.array([pos_x, pos_y])
             angle = np.random.uniform(-np.pi, np.pi)
                             
@@ -1119,20 +1139,27 @@ class ShortcutNavEnv(gym.Env):
         self.character.update_rays()
 
 
-    def make_walls(self, thickness=1, with_shortwall=True):
+    def make_walls(self, thickness=1, with_shortwall=[True]):
         boxes = []
         y = WINDOW_SIZE[1]
         x = WINDOW_SIZE[0]
 
-        walls = ['red', 'green', 'blue', 'yellow']
-        wall_colors = [color_to_idx[color] for color in walls]
+        if self.wall_colors == 4:
+            walls = ['red', 'green', 'blue', 'yellow']
+            wall_colors = [color_to_idx[color] for color in walls]        
+        elif self.wall_colors == 1:
+            walls = ['red', 'red', 'red', 'red']
+            wall_colors = [color_to_idx[color] for color in walls]
+        elif self.wall_colors == 1.5:
+            walls = ['white', 'white', 'white', 'white']
+            wall_colors = [color_to_idx[color] for color in walls]
 
         #outer walls
         boxes.append(Box(np.array([0, 0]), np.array([thickness, y]), color=wall_colors[2]))
         boxes.append(Box(np.array([0, 0]), np.array([x, thickness]), color=wall_colors[3]))
         boxes.append(Box(np.array([0, y-thickness]), np.array([x, thickness]), color=wall_colors[1]))
         boxes.append(Box(np.array([x-thickness, 0]), np.array([thickness, y]), color=wall_colors[0]))
-        
+                    
         # manually create walls here so that we don't need to check more walls than necessary
         # on intersections
         walls = [
@@ -1148,18 +1175,75 @@ class ShortcutNavEnv(gym.Env):
             boxes[3]
         ]
 
-        #shortcut wall
-        boxes.append(Box(np.array([50, 250]), np.array([75, thickness]), color=color_to_idx['white']))
-        boxes.append(Box(np.array([175, 250]), np.array([125, thickness]), color=color_to_idx['white']))
-        walls.append([[50, 250], [125, 250]])
-        walls.append([[175, 250], [300, 250]])
-        wall_refs.append(boxes[4])
-        wall_refs.append(boxes[5])
-        
-        if with_shortwall:
-            boxes.append(Box(np.array([125, 250]), np.array([50, thickness]), color=color_to_idx['purple']))
-            walls.append([[125, 250], [175, 250]])
-            wall_refs.append(boxes[6])
+        if self.shortcut_config == 1:
+            #shortcut wall
+            boxes.append(Box(np.array([50, 250]), np.array([75, thickness]), color=color_to_idx['white']))
+            boxes.append(Box(np.array([175, 250]), np.array([125, thickness]), color=color_to_idx['white']))
+            walls.append([[50, 250], [125, 250]])
+            walls.append([[175, 250], [300, 250]])
+            wall_refs.append(boxes[4])
+            wall_refs.append(boxes[5])
+            
+            if with_shortwall[0]:
+                boxes.append(Box(np.array([125, 250]), np.array([50, thickness]), color=color_to_idx['purple']))
+                walls.append([[125, 250], [175, 250]])
+                wall_refs.append(boxes[6])
+
+                
+        elif self.shortcut_config == 2:
+            #shortcut wall 1
+            boxes.append(Box(np.array([50, 250]), np.array([125, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            boxes.append(Box(np.array([225, 250]), np.array([75, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            walls.append([[50, 250], [175, 250]])
+            walls.append([[225, 250], [300, 250]])
+            
+            if with_shortwall[0]:
+                boxes.append(Box(np.array([175, 250]), np.array([50, thickness]), color=color_to_idx['purple']))
+                wall_refs.append(boxes[-1])
+                walls.append([[175, 250], [225, 250]])
+                
+            #shortcut wall 2
+            boxes.append(Box(np.array([0, 200]), np.array([75, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            boxes.append(Box(np.array([125, 200]), np.array([125, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            walls.append([[0, 200], [75, 200]])
+            walls.append([[125, 200], [250, 200]])
+            
+            if with_shortwall[1]:
+                boxes.append(Box(np.array([75, 200]), np.array([50, thickness]), color=color_to_idx['purple']))
+                wall_refs.append(boxes[-1])
+                walls.append([[75, 200], [125, 200]])
+
+        elif self.shortcut_config == 2.5:
+            #shortcut wall 1
+            boxes.append(Box(np.array([50, 250]), np.array([50, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            boxes.append(Box(np.array([150, 250]), np.array([150, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            walls.append([[50, 250], [100, 250]])
+            walls.append([[150, 250], [300, 250]])
+            
+            if with_shortwall[0]:
+                boxes.append(Box(np.array([100, 250]), np.array([50, thickness]), color=color_to_idx['purple']))
+                wall_refs.append(boxes[-1])
+                walls.append([[100, 250], [150, 250]])
+                
+            #shortcut wall 2
+            boxes.append(Box(np.array([0, 200]), np.array([150, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            boxes.append(Box(np.array([200, 200]), np.array([50, thickness]), color=color_to_idx['white']))
+            wall_refs.append(boxes[-1])
+            walls.append([[0, 200], [150, 200]])
+            walls.append([[200, 200], [250, 200]])
+            
+            if with_shortwall[1]:
+                boxes.append(Box(np.array([150, 200]), np.array([50, thickness]), color=color_to_idx['purple']))
+                wall_refs.append(boxes[-1])
+                walls.append([[150, 200], [200, 200]])
+            
             
         return boxes, walls, wall_refs
         

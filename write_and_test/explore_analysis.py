@@ -193,9 +193,12 @@ copy_t = [0, 1, 0, 0, 1]
 # copy_key = ['batch128_64', 'batch128_64', 'batch128_128', '_64', '_128', '_128']
 # copy_t = [0, 2, 1, 0, 0, 1]
 
-def test_forced_search_activations(model, obs_rms, env_kwargs):
+
+def test_forced_search_activations(model, obs_rms, env_kwargs, save=None):
     '''
     Run search tests for some selected copied actions
+    
+    save: optionally pass a file name to save the results as
     '''
     all_eff, all_traj, all_res = [], [], []
     for key, t in tqdm(zip(copy_key, copy_t), total=len(copy_key)):
@@ -206,7 +209,33 @@ def test_forced_search_activations(model, obs_rms, env_kwargs):
         all_traj += traj
         all_res += res
         
-    return all_eff, all_traj, all_res
+    res = combine_evaluation_results(all_res)
+    res['activations'] = ep_stack_activations(res, combine=True)
+    del res['envs']
+        
+    if save is not None:            
+        pickle.dump(res, open(save, 'wb'))
+        
+    return all_eff, all_traj, res
+
+
+def test_search_activations(model, obs_rms, env_kwargs, save=None):
+    '''
+    Run search tests for some selected copied actions
+    
+    save: optionally pass a file name to save the results as
+    '''
+    effs, trajs, ress = test_search_efficiency(model, obs_rms, env_kwargs=env_kwargs, ret_res=True,
+                        manual_starts=[grid_points, grid_angles])
+        
+    res = combine_evaluation_results(ress)
+    res['activations'] = ep_stack_activations(res, combine=True)
+    del res['envs']
+        
+    if save is not None:            
+        pickle.dump(res, open(save, 'wb'))
+        
+    return effs, trajs, res
 
 
 
@@ -267,7 +296,7 @@ def ep_stack_activations(res, combine=False):
 
 
 
-def hm_process_ress(ress, activ_key='shared_activations', activ_layer=1,
+def hm_process_res(res, activ_key='shared_activations', activ_layer=1,
                    angle_mod=True):
     '''
     Process list of res (ress) that come from a test_search_efficiency or
@@ -278,8 +307,9 @@ def hm_process_ress(ress, activ_key='shared_activations', activ_layer=1,
     angle_mod: whether to mod out the direction contribution of activation
         from the spatial heatmap
     '''
-    res = combine_evaluation_results(ress)
-    activs = ep_stack_activations(res, combine=True)
+    # res = combine_evaluation_results(ress)
+    # activs = ep_stack_activations(res, combine=True)
+    activs = res['activations']
     pos = np.vstack(res['data']['pos'])
     angle = np.vstack(res['data']['angle']).squeeze()
 
@@ -289,14 +319,14 @@ def hm_process_ress(ress, activ_key='shared_activations', activ_layer=1,
     if angle_mod:
         mod_angle_hms = []
         for i in range(num_nodes):
-            activ = activs['shared_activations'][1, :, i]
+            activ = activs[activ_key][activ_layer, :, i]
             uniform_angles, weights = circular_gaussian_filter_fixed_angles(angle.squeeze(), activ,  sigma=50)
             mod_angle_hms.append(weights)
     
     # sigma=5 for these to detect structure in direction maps
     structure_angle_hms = []
     for i in range(num_nodes):
-        activ = activs['shared_activations'][1, :, i]
+        activ = activs[activ_key][activ_layer, :, i]
         uniform_angles, weights = circular_gaussian_filter_fixed_angles(angle.squeeze(), activ,  sigma=5)
         structure_angle_hms.append(weights)
 
@@ -304,9 +334,9 @@ def hm_process_ress(ress, activ_key='shared_activations', activ_layer=1,
     spatial_hms = []
     for i in range(num_nodes):
         if angle_mod:
-            activ = activs['shared_activations'][1, :, i] - mod_angle_hms[i][close_angle_idxs]
+            activ = activs[activ_key][activ_layer, :, i] - mod_angle_hms[i][close_angle_idxs]
         else:
-            activ = activs['shared_activations'][1, :, i]
+            activ = activs[activ_key][activ_layer, :, i]
         hm = gaussian_smooth(pos, activ)
         spatial_hms.append(hm)
         
