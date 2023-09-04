@@ -1083,9 +1083,9 @@ class ShortcutNavEnv(gym.Env):
             # below shortcut wall, facing anywhere
             pos_x = np.random.uniform(10, 290)
             
-            if self.num_shortcuts == 1:
+            if self.shortcut_config in [1]:
                 pos_y = np.random.uniform(10, 240)
-            elif self.num_shortcuts == 2:
+            elif self.shortcut_config in [2, 2.5]:
                 pos_y = np.random.uniform(10, 190)
             pos = np.array([pos_x, pos_y])
             angle = np.random.uniform(-np.pi, np.pi)
