@@ -139,24 +139,35 @@ def main():
         #sizes
         if args.clone_parameter_experiment:
             clone_args = args.clone_args
-            clone_actor_critic, obs_rms = torch.load(clone_args['clone_path'])
+            clone_actor_critic, clone_obs_rms = torch.load(clone_args['clone_path'])
+            
+            # Named layers to clone
             clone_layers = clone_args['clone_layers']
-            freeze_layers = clone_args['freeze']
+            # Named layers to freeze
+            freeze_layers = clone_args['freeze_layers']
             
-            clone_params = list(clone_actor_critic.parameters())
-            actor_critic_params = list(actor_critic.parameters())
-            
-            if type(clone_layers) == int:
-                clone_layers = range(clone_layers)
-            if type(freeze_layers) == bool:
-                freeze_layers = [freeze_layers]*len(clone_layers)
-            for i, layer in enumerate(clone_layers):
-                freeze = freeze_layers[i]
+            for name in clone_layers:
+                copy_params = list(getattr(clone_actor_critic.base, name).parameters())
+                paste_params = list(getattr(actor_critic.base, name).parameters())
+                print(f'Cloning layer {name}')
+                for i in range(len(copy_params)):
+                    paste_params[i].data.copy_(copy_params[i].data)
+                    
+            for name in freeze_layers:
+                print(f'Freezing layer {name}')                
+                params = list(getattr(actor_critic.base, name).parameters())
+                for i in range(len(params)):
+                    params[i].requires_grad = False
+
+            if clone_args['copy_obs_rms']:
+                envs.obs_rms = clone_obs_rms
+            if clone_args['freeze_obs_rms']:
+                envs.training = False
                 
-                actor_critic_params[layer].data.copy_(clone_params[layer].data)
-                if freeze:
-                    actor_critic_params[layer].requires_grad = False
-        
+            print(f'envs.training {envs.training}')
+            print(f'envs.obs_rms.mean {envs.obs_rms.mean}')
+            
+                
         actor_critic.to(device)
 
     print('initializing algo')

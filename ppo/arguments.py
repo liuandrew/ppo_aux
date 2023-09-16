@@ -170,10 +170,7 @@ def get_args():
         help='if toggled, attempt to load a model as named from save_path under the right folder to continue experiment')
     parser.add_argument('--cont-file-name', type=str, default=None,
         help='if given, try to load a specific file')
-
-
     
-
     #Andy: add options for using a custom NN base for policy
     parser.add_argument('--nn-base', type=str, default=None,
         help='pass a string to use a specific NNBase from model.py, e.g. FlexBase')
@@ -201,6 +198,15 @@ def get_args():
         help='if clone-parameter-eperiment is true, pass params. Params expected: \n"clone_path": direct path to target clone newtork \n' + \
              '"clone_layers": list of layers that we want to clone or int of first n layers\n' + \
              '"freeze": boolean of whether to freeze the cloned layers. True/False or list for each layer in list')
+
+    ''' Example
+      clone_args = {
+        'clone_layers': ['gru', 'shared0'], #named layers to copy over,
+        'freeze_layers': ['gru', 'shared0'], #named layers to freeze,
+        'copy_obs_rms': True #whether to copy obs_rms to envs,
+        'freeze_obs_rms': True #whether to freeze obs_rms
+    }
+    '''
 
     #Andy: One speicifc experiment to see if we remove non-val grads from shared layer,
     # is there actually a reduction in performance

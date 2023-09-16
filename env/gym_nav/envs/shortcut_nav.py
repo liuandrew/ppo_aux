@@ -535,6 +535,7 @@ class ShortcutNavEnv(gym.Env):
         self.shortcut_probability = shortcut_probability
         self.wall_colors = wall_colors
         self.shortcut_config = shortcut_config
+        self.shortcuts_available = [False]
         
         observation_width = num_rays
         self.ray_obs_width = num_rays
@@ -997,11 +998,18 @@ class ShortcutNavEnv(gym.Env):
             num_shortcuts = 2
             
         make_shortwall = []
-        for i in range(num_shortcuts):
-            if np.random.random() < self.shortcut_probability:
-                make_shortwall.append(False)
-            else:
-                make_shortwall.append(True)
+        if type(self.shortcut_probability) in [float, int]:
+            for i in range(num_shortcuts):
+                if np.random.random() < self.shortcut_probability:
+                    make_shortwall.append(False)
+                else:
+                    make_shortwall.append(True)
+        elif type(self.shortcut_probability) in [list, np.ndarray]:
+            for i in range(num_shortcuts):
+                if np.random.random() < self.shortcut_probability[i]:
+                    make_shortwall.append(False)
+                else:
+                    make_shortwall.append(True)
         self.boxes, walls, wall_refs = self.make_walls(thickness=wall_thickness, with_shortwall=make_shortwall)
                 
             
@@ -1175,6 +1183,7 @@ class ShortcutNavEnv(gym.Env):
             boxes[3]
         ]
 
+        self.shortcuts_available = list(~np.array(with_shortwall))
         if self.shortcut_config == 1:
             #shortcut wall
             boxes.append(Box(np.array([50, 250]), np.array([75, thickness]), color=color_to_idx['white']))
@@ -1188,7 +1197,6 @@ class ShortcutNavEnv(gym.Env):
                 boxes.append(Box(np.array([125, 250]), np.array([50, thickness]), color=color_to_idx['purple']))
                 walls.append([[125, 250], [175, 250]])
                 wall_refs.append(boxes[6])
-
                 
         elif self.shortcut_config == 2:
             #shortcut wall 1

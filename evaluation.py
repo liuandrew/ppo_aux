@@ -306,8 +306,7 @@ def shortcut_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data,
         data['ep_shortcut'] = []
 
     if first:
-        shortcut_available = len(env.envs[0].vis_walls) == 6
-        data['ep_shortcut'].append(shortcut_available)
+        data['ep_shortcut'] = env.envs[0].shortcuts_available
 
     if stack:
         data['pos'].append(np.vstack(data['ep_pos']))
