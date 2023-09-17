@@ -109,9 +109,11 @@ def main():
     print('Normalize Env:', args.normalize_env)
     envs = make_vec_envs(args.env_name, args.seed, args.num_processes,
                          args.gamma, args.log_dir, device, False, capture_video=args.capture_video,
-                         env_kwargs=args.env_kwargs, normalize=args.normalize_env,
+                         env_kwargs=args.env_kwargs,
                          **args.aux_wrapper_kwargs)
-
+    if not args.normalize_env:
+        envs.eval()
+        
     loaded_model = False
     # print(args.cont)
     print('initializing model')
