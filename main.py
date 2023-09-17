@@ -144,7 +144,10 @@ def main():
             # Named layers to clone
             clone_layers = clone_args['clone_layers'].split(',')
             # Named layers to freeze
-            freeze_layers = clone_args['freeze_layers'].split(',')
+            if 'freeze_layers' in clone_args:
+                freeze_layers = clone_args['freeze_layers'].split(',')
+            else:
+                freeze_layers = []
             
             for name in clone_layers:
                 copy_params = list(getattr(clone_actor_critic.base, name).parameters())
