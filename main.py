@@ -142,9 +142,9 @@ def main():
             clone_actor_critic, clone_obs_rms = torch.load(clone_args['clone_path'])
             
             # Named layers to clone
-            clone_layers = clone_args['clone_layers']
+            clone_layers = clone_args['clone_layers'].split(',')
             # Named layers to freeze
-            freeze_layers = clone_args['freeze_layers']
+            freeze_layers = clone_args['freeze_layers'].split(',')
             
             for name in clone_layers:
                 copy_params = list(getattr(clone_actor_critic.base, name).parameters())
