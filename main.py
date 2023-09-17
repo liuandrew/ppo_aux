@@ -165,7 +165,8 @@ def main():
             if clone_args['copy_obs_rms']:
                 envs.obs_rms = clone_obs_rms
             if clone_args['freeze_obs_rms']:
-                envs.training = False
+                # envs.training = False
+                envs.eval()
                 
             print(f'envs.training {envs.training}')
             print(f'envs.obs_rms.mean {envs.obs_rms.mean}')
