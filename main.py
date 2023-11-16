@@ -234,11 +234,13 @@ def main():
         # To implement, simply add a def set_universal_step(self, global_step)
         #  function to the env, have it save it to a self.global_step variable
         #  and respond to the global step in some way
+        # The paramemter added should be a dictionary containing 'on': True,
+        #  'schedule': list of steps to send update to environment on
         if args.use_universal_step['on']:
             schedule = np.array(args.use_universal_step['schedule'])
             b = np.argwhere(global_step >= schedule).reshape(-1)
             if len(b) == 0:
-                idx = None
+                idx = 0
             else:
                 idx = b[-1]
             if idx > universal_step_reset_point:
