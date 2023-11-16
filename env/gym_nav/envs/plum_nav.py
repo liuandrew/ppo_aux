@@ -424,7 +424,7 @@ def intersect(p1, p2, p3, p4):
 
 class PlumNavEnv(gym.Env):
     metadata = {"render.modes": ['rgb_array', 'human'], 'video.frames_per_second': 24}
-    def __init__(self, num_rays=12, fov=1, max_steps=200,
+    def __init__(self, num_rays=12, fov=1, max_steps=500,
                 rew_structure='goal', give_heading=0, verbose=0,
                 world_gen_func=None, world_gen_params={}, give_dist=True,
                 give_time=False, collission_penalty=0, default_reward=0,
@@ -551,6 +551,7 @@ class PlumNavEnv(gym.Env):
         self.wall_thickness = wall_thickness
         self.wall_colors = wall_colors
         self.num_plums = num_plums
+        self.plum_grid_generated = False
         
         observation_width = num_rays
         self.ray_obs_width = num_rays
@@ -586,7 +587,6 @@ class PlumNavEnv(gym.Env):
         self.max_steps = max_steps
         self.current_steps = 0
         
-        self.generate_valid_plum_grid()
         self.character = Character(num_rays=self.num_rays, fov=self.fov, one_hot_obs=one_hot_obs)
         self.initial_character_position = self.character.pos.copy()
         self.render_character = render_character
@@ -969,27 +969,81 @@ class PlumNavEnv(gym.Env):
             self.col_wall_refs[key] = wall_refs[i]
             
             
-        corners = [np.array([50., 175.]),
-                   np.array([175., 175.]),
-                   np.array([50., 50.]),
-                   np.array([175., 50.])]
-        colors = ['red', 'green', 'yellow', 'purple']
-        if self.task_structure == 1.5:
-            colors = np.random.permutation(colors)
         
         # Generate 4 boxes
         if self.task_structure == 1 or self.task_structure == 1.5:
+            corners = [np.array([50., 175.]),
+                    np.array([175., 175.]),
+                    np.array([50., 50.]),
+                    np.array([175., 50.])]
+            colors = ['red', 'green', 'yellow', 'purple']
+            if self.task_structure == 1.5:
+                colors = np.random.permutation(colors)
+            
             for i, corner in enumerate(corners):
                 key = f'square{i}'
                 box = Box(corner, np.array([75., 75.]), color=color_to_idx[colors[i]])
                 self.add_box_to_walls(box, key)
-            for i in range(self.num_plums):
-                self.generate_plum(i)
-        
-                    
+                            
         # Generate random slanted walls
-        if self.task_structure == 2:
-            pass
+        if self.task_structure == 2 or self.task_structure == 2.5:
+            corners = [
+                np.array([40., 80.]), #\
+                np.array([175., 120.]), #^
+                np.array([175., 120.]), 
+                np.array([235., 125.]), #^
+                np.array([235., 125.]),
+                np.array([130., 180.]), #-
+                np.array([110., 265.]), #^
+                np.array([110., 265.]),
+                np.array([210., 265.]), #\
+            ]
+            angles = [ #add some decimals to make weird parallels unlikely
+                -30.11,
+                -80.11,
+                200.11,
+                -45.11,
+                -89.11,
+                -5.11,
+                -20.11,
+                -120.11,
+                -40.11,
+            ]
+            widths = [
+                80.,
+                70.,
+                80.,
+                40.,
+                100.,
+                100.,
+                60.,
+                160., 
+                75.,
+            ]
+            colors = ['purple', 'red', 'green', 'yellow', 'white', 'purple']
+            color_nums = np.cumsum([1, 2, 2, 1, 2, 1])
+            if self.task_structure == 2.5:
+                colors = np.random.permutation(colors)
+            for i in range(len(corners)):
+                corner = corners[i]
+                angle = angles[i]
+                width = widths[i]
+                color = colors[np.argmax(i < color_nums)]
+                color = color_to_idx[color]
+                height = 5
+                key = f'box{i}'
+                box = Box(corner, np.array([width, height]), angle=angle, color=color)
+                self.add_box_to_walls(box, key)
+                
+        # generate the plum grid after walls are made
+        if not self.plum_grid_generated:
+            self.generate_valid_plum_grid()
+            self.plum_grid_generated = True
+                
+
+        for i in range(self.num_plums):
+            self.generate_plum(i)
+
             
         pos_x = np.random.uniform(125, 175)
         pos_y = np.random.uniform(10, 60)
@@ -1017,6 +1071,31 @@ class PlumNavEnv(gym.Env):
                             (grid[:, 1] > corner[1]-5) & (grid[:, 1] < corner[1]+80) )]
             self.plum_grid = grid
             
+        elif self.task_structure == 2 or self.task_structure == 2.5:
+            self.plum_grid = self.find_valid_plum_grid()
+        
+        
+    def find_valid_plum_grid(self):
+        # Find valid plum points by generating a grid and looking for intersections with walls
+        wall_xy = get_wall_xy(self)
+
+        xgrid = np.linspace(5, 295, 150)
+        grid = list(itertools.product(xgrid, xgrid))
+        valid_grids = []
+
+        box_size = 10
+        for corner in grid:
+            box = Box(np.array(corner), np.array([box_size, box_size]))
+            test_walls = box.get_walls()
+            add_wall = True
+            for wall in test_walls:
+                if check_col(wall[0], wall[1], wall_xy):
+                    add_wall = False
+                    break
+            if add_wall:
+                valid_grids.append(corner)
+        return np.array(valid_grids)
+    
             
     def add_box_to_walls(self, box, base_key, vis=True, col=True):
         # Add the walls of a box to dictionary of walls
@@ -1135,3 +1214,61 @@ class PlumNavEnv(gym.Env):
     def seed(self, seed=0):
         np.random.seed(seed)
 
+
+
+
+
+'''
+Helper functions for generating plum grid for arbitrary environment
+'''
+def get_wall_xy(env):
+    walls = list(env.col_walls.values())
+    wall_p = np.array(walls).reshape(-1, 4)
+    x3 = wall_p[:, 0].reshape(1, -1)
+    y3 = wall_p[:, 1].reshape(1, -1)
+    x4 = wall_p[:, 2].reshape(1, -1)
+    y4 = wall_p[:, 3].reshape(1, -1)
+    return [x3, y3, x4, y4]
+
+def check_col(start, end, wall_xy):
+    '''
+    March forward to check if there is collision with any walls
+    start: starting position
+    end: desired end position (may be stopped earlier if collision occurs)
+    col_walls: wall objects that can detect collision
+    col_wall_refs: corresponding wall object references
+    '''               
+    x3, y3, x4, y4 = wall_xy 
+    x1 = start[0]
+    y1 = start[1]
+    x2 = end[0]
+    y2 = end[1]
+    
+    epsilon = 1e-8
+    
+    #Compute intersect metrics
+    denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1) + epsilon
+    ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+    ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+
+    #Compute x y intersects
+    x = x1 + ua*(x2-x1)
+    y = y1 + ua*(y2-y1)
+
+    #Compute dists
+    dists = np.sqrt((x - start[0])**2 + (y - start[1])**2).squeeze()
+    
+    #Only keep distances with valid intersects
+    mults = np.full(x.shape, 1.)
+    mults[((ua < 0) | (ua > 1) | (ub < 0) | (ub > 1))] = np.inf
+
+    #We get np.nan where lines are parallel which throws off the argmin
+    # Setting parallel to inf should fix the issue
+    dists[np.isnan(dists)] = np.inf
+    
+    #Some intersection occurs
+    if (mults != np.inf).any():
+        min_idx = np.argmin(mults*dists)
+        return True
+    else:
+        return False
