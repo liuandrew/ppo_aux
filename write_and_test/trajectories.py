@@ -23,7 +23,8 @@ def get_ep_pos_angle_from_data(res):
 
 
 
-def draw_trajectory(pos=None, angle=None, fig=None, ax=None, rew=None):
+def draw_trajectory(pos=None, angle=None, fig=None, ax=None, rew=None, color=None,
+                    color_last=True, color_first=True):
     '''Convert positions and angles into an image trajectory
     Adds a few extra details like where the start and goal reached locations are
     as well as adding increasing redness as the agent spends time in one spot rotating
@@ -39,8 +40,8 @@ def draw_trajectory(pos=None, angle=None, fig=None, ax=None, rew=None):
     last_p = np.zeros(2)
     for i, (p, a) in enumerate(zip(pos, angle)):
         redness = max(0, 1-stopped*0.1)
-        color = [1, redness, redness, 1]
-        draw_character(p, a[0], ax=ax, color=color)
+        draw_color = [1, redness, redness, 1] if color is None else color
+        draw_character(p, a[0], ax=ax, color=draw_color)
 
         if (p == last_p).all():
             stopped += 1
@@ -48,8 +49,10 @@ def draw_trajectory(pos=None, angle=None, fig=None, ax=None, rew=None):
             stopped = 0
         last_p = p
 
+    draw_color = [0, 1, 0, 1] if color is None else color
     #redraw first step
-    draw_character(pos[0], angle[0][0], color=[0, 1, 0, 1], size=18, ax=ax)
+    if color_first:
+        draw_character(pos[0], angle[0][0], color=draw_color, size=18, ax=ax)
     
     #draw last step assuming it is a success if number of steps is less than 202
     #  for the fixed goal task
@@ -57,7 +60,7 @@ def draw_trajectory(pos=None, angle=None, fig=None, ax=None, rew=None):
         rew_steps = np.where(rew == 1)[0]
         for step in rew_steps:
             draw_character(pos[step], angle[step][0], color=[0, 1, 1, 1], size=18, ax=ax)
-    elif len(pos) < 202:
+    elif len(pos) < 202 and color_last:
         draw_character(pos[-1], angle[-1][0], color=[0, 1, 1, 1], size=18, ax=ax)
     ax.format(xlim=[0, 300], ylim=[0, 300])
     
@@ -244,4 +247,4 @@ def set_trajectory_plot_style(reset=False):
         })
     
 #Note we call set_trajectory_plot_style here
-set_trajectory_plot_style()
+# set_trajectory_plot_style()

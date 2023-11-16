@@ -11,3 +11,7 @@ register(
     id='ExploreNav-v0',
     entry_point='gym_nav.envs:ExploreMWM',
 )
+register(
+    id='PlumNav-v0',
+    entry_point='gym_nav.envs:PlumNavEnv',
+)

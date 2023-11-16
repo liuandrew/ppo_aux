@@ -50,6 +50,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
 
     all_obs = []
     all_actions = []
+    all_action_log_probs = []
+    all_action_probs = []
     all_rewards = []
     all_rnn_hxs = []
     all_dones = []
@@ -63,6 +65,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
     
     ep_obs = []
     ep_actions = []
+    ep_action_log_probs = []
+    ep_action_probs = []
     ep_rewards = []
     ep_rnn_hxs = []
     ep_dones = []
@@ -104,6 +108,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
                 device=device)
             
             ep_actions.append(action)
+            ep_action_log_probs.append(outputs['action_log_probs'])
+            ep_action_probs.append(outputs['probs'])
             ep_rewards.append(reward)
             ep_dones.append(done)
             ep_values.append(outputs['value'])
@@ -145,6 +151,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
             if done[0]:
                 all_obs.append(np.vstack(ep_obs))
                 all_actions.append(np.vstack(ep_actions))
+                all_action_log_probs.append(np.vstack(ep_action_log_probs))
+                all_action_probs.append(np.vstack(ep_action_probs))
                 all_rewards.append(np.vstack(ep_rewards))
                 all_rnn_hxs.append(np.vstack(ep_rnn_hxs))
                 all_dones.append(np.vstack(ep_dones))
@@ -165,6 +173,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
                     
                 ep_obs = []
                 ep_actions = []
+                ep_action_log_probs = []
+                ep_action_probs = []
                 ep_rewards = []
                 ep_rnn_hxs = []
                 ep_dones = []
@@ -191,6 +201,8 @@ def evaluate(actor_critic, obs_rms=None, normalize=True, env_name='NavEnv-v0', s
     return {
         'obs': all_obs,
         'actions': all_actions,
+        'action_log_probs': all_action_log_probs,
+        'action_probs': all_action_probs,
         'rewards': all_rewards,
         'rnn_hxs': all_rnn_hxs,
         'dones': all_dones,
@@ -287,42 +299,6 @@ def explore_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, 
     return data
 
 
-def shortcut_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stack=False,
-                      first=False):
-    '''
-    Add navigation data pos and angle and position of platform to data
-    '''
-    if 'pos' not in data:
-        data['pos'] = []
-    if 'angle' not in data:
-        data['angle'] = []
-    if 'shortcut' not in data:
-        data['shortcut'] = []
-    if 'ep_pos' not in data:
-        data['ep_pos'] = []
-    if 'ep_angle' not in data:
-        data['ep_angle'] = []
-    if 'ep_shortcut' not in data:
-        data['ep_shortcut'] = []
-
-    if first:
-        data['ep_shortcut'] = env.envs[0].shortcuts_available
-
-    if stack:
-        data['pos'].append(np.vstack(data['ep_pos']))
-        data['angle'].append(np.vstack(data['ep_angle']))
-        data['shortcut'].append(data['ep_shortcut'])
-        
-        data['ep_pos'] = []
-        data['ep_angle'] = []        
-        data['ep_shortcut'] = []
-    elif not done[0]:
-        pos = env.get_attr('character')[0].pos.copy()
-        angle = env.get_attr('character')[0].angle
-        data['ep_pos'].append(pos)
-        data['ep_angle'].append(angle)
-    
-    return data
 
 def simple_vec_envs(obs_rms=None, env_name='NavEnv-v0', normalize=True, seed=None, num_processes=1,
              device=torch.device('cpu'), capture_video=False, env_kwargs={},
@@ -346,6 +322,7 @@ def simple_vec_envs(obs_rms=None, env_name='NavEnv-v0', normalize=True, seed=Non
         vec_norm.obs_rms = obs_rms
         
     return envs
+
 
 
 
@@ -452,3 +429,137 @@ def evaluate_steps(actor_critic, envs, num_steps=10, data_callback=None,
         'auxiliary_preds': ep_auxiliary_preds,
         'auxiliary_truths': ep_auxiliary_truths,
     }
+
+
+def shortcut_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stack=False,
+                      first=False):
+    '''
+    Check whether shortcut is used in addition to position and angle of character
+    '''
+    if 'pos' not in data:
+        data['pos'] = []
+    if 'angle' not in data:
+        data['angle'] = []
+    if 'shortcut' not in data:
+        data['shortcut'] = []
+    if 'ep_pos' not in data:
+        data['ep_pos'] = []
+    if 'ep_angle' not in data:
+        data['ep_angle'] = []
+    if 'ep_shortcut' not in data:
+        data['ep_shortcut'] = []
+
+    if first:
+        data['ep_shortcut'] = env.envs[0].shortcuts_available
+
+    if stack:
+        data['pos'].append(np.vstack(data['ep_pos']))
+        data['angle'].append(np.vstack(data['ep_angle']))
+        data['shortcut'].append(data['ep_shortcut'])
+        
+        data['ep_pos'] = []
+        data['ep_angle'] = []
+        data['ep_shortcut'] = []
+    elif not done[0]:
+        pos = env.get_attr('character')[0].pos.copy()
+        angle = env.get_attr('character')[0].angle
+        data['ep_pos'].append(pos)
+        data['ep_angle'].append(angle)
+    
+    return data
+
+
+def shortcut_visdata_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stack=False,
+                      first=False):
+    '''
+    Check whether shortcut is used and also keep track of when shortcut enters vision
+    '''
+    if 'pos' not in data:
+        data['pos'] = []
+    if 'angle' not in data:
+        data['angle'] = []
+    if 'shortcut' not in data:
+        data['shortcut'] = []
+    if 'ep_pos' not in data:
+        data['ep_pos'] = []
+    if 'ep_angle' not in data:
+        data['ep_angle'] = []
+    if 'ep_shortcut' not in data:
+        data['ep_shortcut'] = []
+    if 'ep_shortcut_vis' not in data:
+        data['ep_shortcut_vis'] = []
+    if 'shortcut_vis' not in data:
+        data['shortcut_vis'] = []
+
+    if first:
+        data['ep_shortcut'] = env.envs[0].shortcuts_available
+
+    if stack:
+        data['pos'].append(np.vstack(data['ep_pos']))
+        data['angle'].append(np.vstack(data['ep_angle']))
+        data['shortcut'].append(data['ep_shortcut'])
+        data['shortcut_vis'].append(data['ep_shortcut_vis'])
+        
+        data['ep_pos'] = []
+        data['ep_angle'] = []        
+        data['ep_shortcut'] = []
+        data['ep_shortcut_vis'] = []
+    elif not done[0]:
+        pos = env.get_attr('character')[0].pos.copy()
+        angle = env.get_attr('character')[0].angle
+        data['ep_pos'].append(pos)
+        data['ep_angle'].append(angle)
+        data['ep_shortcut_vis'].append(check_shortcut_vision(pos, angle))
+    
+    return data
+
+
+
+def check_shortcut_vision(pos, angle, fov=1, num_rays=12):
+    '''Check if any vision lines would be intersecting with shortcut
+    if it was there, given a set angle and position'''
+    x3 = np.array([[125]])
+    x4 = np.array([[175]])
+    y3 = np.array([[250]])
+    y4 = np.array([[251]])
+
+    fov = 1
+    num_rays = 12
+    ray_max_len = 550
+
+    fov_start = angle - fov/2
+    fov_end = fov_start + fov
+
+    ray_angles = np.linspace(fov_start, fov_end, num_rays, endpoint=False)
+    ray_mults = np.array([np.cos(ray_angles), np.sin(ray_angles)]).T
+    ray_starts = np.full((num_rays, 2), pos)
+
+    x1 = ray_starts[:, 0].reshape(-1, 1)
+    y1 = ray_starts[:, 1].reshape(-1, 1)
+    ray_ends = ray_mults * ray_max_len + pos
+    x2 = ray_ends[:, 0].reshape(-1, 1)
+    y2 = ray_ends[:, 1].reshape(-1, 1)
+    
+    #Compute intersect metrics
+    epsilon = 1e-8
+    denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1) + 1e-8
+    ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+    ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+
+    #Compute x y intersects (they ARE both supposed to be ua)
+    x = x1 + ua*(x2-x1)
+    y = y1 + ua*(y2-y1)
+
+    #Compute distances to intersects
+    dists = np.sqrt((x - pos[0])**2 + (y - pos[1])**2)
+
+    #Only keep distances with valid intersects
+    mults = np.full(x.shape, 1.)
+    mults[((ua < 0) | (ua > 1) | (ub < 0) | (ub > 1))] = np.inf
+
+    #We get np.nan where lines are parallel which throws off the argmin
+    # Setting parallel to inf should fix the issue
+    dists[np.isnan(dists)] = np.inf
+    
+    return (mults*dists < np.inf).any()
+

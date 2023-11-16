@@ -104,6 +104,7 @@ class Policy(nn.Module):
         
         outputs['action'] = action
         outputs['action_log_probs'] = action_log_probs
+        outputs['probs'] = dist.probs
 
         return outputs
 
@@ -130,6 +131,10 @@ class Policy(nn.Module):
         dist_entropy = dist.entropy().mean()
 
         return value, action_log_probs, dist_entropy, rnn_hxs, auxiliary
+    
+    def get_rnn_hxs(self, num_processes=1):
+        '''Get blank rnn_hxs to be used for a reset computation'''
+        return torch.zeros(num_processes, self.recurrent_hidden_state_size)
 
 
 class NNBase(nn.Module):
@@ -1083,7 +1088,17 @@ class DelayedRNNPPO(NNBase):
     def forward(self, inputs, rnn_hxs, masks, deterministic=False, with_activations=False):
         """Same as forward function but this will pass back all intermediate values
 
-            _type_: _description_
+        Generally this is called with a batch of 1 step inputs from N processes with size
+        inputs: [N, obs_dim]
+        rnn_hxs: [N, hidden_dim]
+        masks: [N, 1]
+            (masks are 1 to indicate episode is continuing or 0 to indicate
+             an episode completion and reset of rnn state)
+        
+        If trying to evaluate multiple steps (which most commonly happens during update step)
+        inputs: [T*N, obs_dim]
+        rnn_hxs: [N, hidden_dim]
+        masks: [T*N, 1]
         """
         auxiliary_preds = [None for i in range(len(self.auxiliary_output_sizes))]
         x = inputs

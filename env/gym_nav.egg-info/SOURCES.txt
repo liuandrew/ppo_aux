@@ -9,4 +9,5 @@ gym_nav.egg-info/top_level.txt
 gym_nav/envs/__init__.py
 gym_nav/envs/explore_mwm.py
 gym_nav/envs/nav_env_flat.py
+gym_nav/envs/plum_nav.py
 gym_nav/envs/shortcut_nav.py

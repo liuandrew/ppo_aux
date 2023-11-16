@@ -1,10 +1,16 @@
 import numpy as np
 from evaluation import *
 from model_evaluation import *
+from plotting_utils import *
 from umap import UMAP
-from explore_analysis import ep_stack_activations
 from tqdm import tqdm
 import proplot as pplt
+import itertools
+from collections import defaultdict
+from scipy.optimize import linear_sum_assignment
+from scipy.spatial import distance
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
 
 turn_speed = 0.3
 move_speed = 10
@@ -12,6 +18,716 @@ move_speed = 10
 shortcut_target = np.array([150, 250])
 path_target = np.array([25, 250])
 goal_target = np.array([275, 275])
+
+
+
+
+'''
+================================================================
+Clustering measures
+================================================================
+Various measures of clustering
+Primarily point cloud Euclidean Wasserstein and silhouette scores
+'''
+
+def two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None):
+    '''
+    Compute the Wasserstein distance between 2 point clouds
+    by finding which pairs of points minimizes distances between the two
+    
+    X, Y: [N, features] arrays of cloud data
+    normalize: if True, normalize wasserstein based on the maximum L2 distance possible
+        between both sets
+    all_data: [N, features] optionally pass this to calculate maximum L2 distance rather than
+        X and Y, for example if X and Y are a subset
+        e.g., two_cloud_wasserstein(activ2d[color==0], activ2d[color==1], all_data=activ2d)
+    min_max: [2, features] optionally instead of letting the function calculate L2 normalization, pass
+        mins and maxes precalculated
+        e.g., min_max = np.vstack([activ.min(axis=0), activ.max(axis=0)])
+    
+    returns:
+        mean_dist,
+        x_ind, y_ind: the indices of X and Y that are used to minimize distances
+    '''
+    
+    distance_matrix = distance.cdist(X, Y, 'euclidean')
+    x_ind, y_ind = linear_sum_assignment(distance_matrix)
+    wasserstein_dist = distance_matrix[x_ind, y_ind].sum()
+    mean_dist = wasserstein_dist / len(x_ind)
+    
+    if all_data is not None:
+        min_max = np.vstack([all_data.min(axis=0), all_data.max(axis=0)])
+    elif normalize:
+        all_data = np.vstack([X, Y])
+        min_max = np.vstack([all_data.min(axis=0), all_data.max(axis=0)])
+    
+    if min_max is not None:
+        L2 = np.linalg.norm(min_max[1, :] - min_max[0, :])
+        mean_dist = mean_dist / L2
+    
+    return mean_dist, x_ind, y_ind
+
+
+
+def pairwise_silhouette_score(a, labels):
+    '''Compute pairwise silhouette score'''
+    silscores = np.zeros((5, 5))
+    # silscores = []
+    for i, j in itertools.product(range(5), range(5)):
+        if j > i and (labels == i).sum() > 0 and (labels == j).sum() > 0:
+            silscores[i, j] = two_set_silhouette_score(a[labels == i], a[labels == j])
+            # silscores.append(two_set_silhouette_score(a[labels == i], a[labels == j]))
+            
+    if len(silscores) > 0:
+        # return np.mean(silscores)
+        return silscores
+    else:
+        return 0
+    
+    
+def one_vs_all_silhouette_score(a, labels):
+    silscores = np.zeros(5)
+    for i in range(5):
+        silscores[i] = two_set_silhouette_score(a[labels == i], a[labels != i])
+    return silscores
+
+    
+def two_set_silhouette_score(x1, x2):
+    '''Find the silhouette score between two point clouds of data'''
+    X = np.vstack([x1, x2])
+    labels = [0]*len(x1) + [1]*len(x2)
+    score = silhouette_score(X, labels)    
+    return score
+
+
+def shortcut_decomposed_silhouettes(a, labels):
+    '''Take clusters from decompose_shortcut_trajectories and calculate some 
+    cluster distances'''
+    silscores = []
+
+    # Green vs orange - heading towards entrance vs shortcut
+    i, j = 1, 2
+    if (labels == i).sum() > 0 and (labels == j).sum() > 0:
+        silscores.append(two_set_silhouette_score(a[labels == i], a[labels == j]))
+    else:
+        silscores.append(0)
+    
+    # Red vs purple - corridor from shortcut vs entrance
+    i, j = 3, 4
+    if (labels == i).sum() > 0 and (labels == j).sum() > 0:
+        silscores.append(two_set_silhouette_score(a[labels == i], a[labels == j]))
+    else:
+        silscores.append(0)
+
+    # start vs end - before corridor vs after corridor
+    idxs1 = np.isin(labels, [0, 1, 2])
+    idxs2 = np.isin(labels, [3, 4])
+    if idxs1.sum() > 0 and idxs2.sum() > 0:
+        silscores.append(two_set_silhouette_score(a[idxs1], a[idxs2]))
+    else:
+        silscores.append(0)
+        
+    return silscores
+
+
+'''
+================================================================
+Plotting functions
+================================================================
+'''
+
+def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
+                         split_activ=False, format_ax=True):
+    '''
+    Flexible plotting of 2d projected activations and coloring
+    
+    activ2d: 2d projection of population activity
+    labels: array of labels for each point
+        -1: unlabeled color
+    pos: pass array of positions if wanting to plot these
+    split_activ: if True, split each label into its on subaxes
+    format_ax: whether to handle formatting as standard
+    '''
+    num_classes = (np.unique(labels) != -1).sum()
+    num_cols = 1
+    if split_activ:
+        num_cols += num_classes
+    if pos is not None:
+        num_cols += num_classes
+    
+    
+    if ax is None:
+        fig, ax = pplt.subplots(ncols=num_cols, sharey=False)
+    
+    if format_ax:
+        if split_activ:
+            xmin, ymin = activ2d.min(axis=0)-1
+            xmax, ymax = activ2d.max(axis=0)+1
+            ax[:num_classes+1].format(xlim=[xmin, xmax], ylim=[ymin, ymax])
+        
+        if pos is not None:
+            if split_activ:
+                ax[num_classes+1:].format(xlim=[0,300], ylim=[0,300])
+            else:
+                ax[1:].format(xlim=[0,300], ylim=[0,300])
+                
+            
+    if (labels == -1).sum() > 0:
+        idxs = labels == -1
+        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.01, color='gray')
+    for i in range(num_classes):
+        idxs = labels == i
+        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+        if split_activ:
+            ax[i+1].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+        if pos is not None:
+            if split_activ:
+                ax[i+1+num_classes].scatter(pos[idxs, 0], pos[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+            else:
+                ax[i+1].scatter(pos[idxs, 0], pos[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+                
+
+def plot_two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None, one_ax=True,
+                               colors=[None, None]):
+    '''
+    Given two point clouds, plot the distances used to move points close together
+    and visualize how the two cloud wasserstein is computed
+    Note this will make most sense on 2D data, but if higher dimensional data is
+    given we'll calculate the wasserstein using all dimensions, but only pot the first two
+    
+    normalize, all_data, min_max: normalization options, the same as from
+        two_cloud_wasserstein()
+    one_ax: if True plot onto one axis, if False plot onto 3
+    colors: optionally pass list of 2 colors to color the points with
+    '''
+    
+    dist, x_inds, y_inds = two_cloud_wasserstein(X, Y, normalize, all_data, min_max)
+
+    if one_ax:
+        fig, ax = pplt.subplots()
+        ax.scatter(X[:, 0], X[:, 1], alpha=0.3, color=colors[0])
+        ax.scatter(Y[:, 0], Y[:, 1], alpha=0.3, color=colors[1])
+        
+    else:
+        fig, ax = pplt.subplots(ncols=3)
+        ax[0].scatter(X[:, 0], X[:, 1], alpha=0.3, color=colors[0])
+        ax[1].scatter(Y[:, 0], Y[:, 1], alpha=0.3, color=colors[1])
+
+    for i in range(len(x_inds)):
+        x_ind = x_inds[i]
+        y_ind = y_inds[i]
+        if one_ax:
+            ax.plot([X[x_ind, 0], Y[y_ind, 0]], 
+                    [X[x_ind, 1], Y[y_ind, 1]], color='gray', alpha=0.3)      
+        else:
+            ax[2].plot([X[x_ind, 0], Y[y_ind, 0]], 
+                    [X[x_ind, 1], Y[y_ind, 1]], color='gray', alpha=0.3)
+    
+    if all_data is None:
+        all_data = np.vstack([X, Y])
+    xmin = all_data[:,0].min()
+    ymin = all_data[:,1].min()
+    xmax = all_data[:,0].max()
+    ymax = all_data[:,1].max()
+    
+    ax.format(xlim=[xmin, xmax], ylim=[ymin, ymax],
+             title=['', '', f'{dist:.3f}'])
+    return ax, dist
+
+
+def linear_bestfit(x, y):
+    if type(x) == list:
+        x = np.array(x)
+    if type(y) == list:
+        y = np.array(y)
+    
+    if len(x.shape) == 1:
+        x = x.reshape(-1, 1)
+    
+    lr = LinearRegression().fit(x, y)
+    y_pred = lr.predict(x)
+    
+    x_min, x_max = x.min(), x.max()
+    r2 = r2_score(y, y_pred)
+    
+    xs = np.array([x_min, x_max]).reshape(-1, 1)
+    ys = lr.predict(xs)
+    
+    return xs, ys, r2
+
+
+
+def draw_shortcut_maze(shortcut_open=True, ax=None):
+    '''Draw the walls for a shortcut maze on the given axis'''
+    if ax is None:
+        fig, ax = pplt.subplots()
+    
+    shortcut_probability = 1 if shortcut_open else 0
+    env = gym.make('ShortcutNav-v0', shortcut_probability=shortcut_probability, 
+                   render_character=False,
+                   wall_colors=1.5)
+    env.render('human', ax=ax)
+    ax.format(xlim=[0, 300], ylim=[0, 300])
+
+
+
+'''
+================================================================
+Miscellanious helper functions
+================================================================
+'''
+
+def get_ep_lens(ep_pos):
+    ep_lens = [len(ep) for ep in ep_pos]
+    return ep_lens
+
+
+def ep_split_res(target, ep_lens):
+    data = []
+    cur_idx = 0
+    for l in ep_lens:
+        data.append(target[cur_idx:cur_idx+l])
+        cur_idx += l
+    return data
+
+def ep_stack_activations(res, combine=False, half=False):
+    '''Stack activations dictionaries from episodic evaluation calls
+    
+    combine: whether to combine all activations so there are no episodic separations
+    half: use half precision to save space
+    returns: list of dictionaries
+        Ex. activs[ep]['shared_activations'][layer_num]
+    '''    
+    activs = []
+    for ep in range(len(res['activations'])):
+        activs.append(stack_activations(res['activations'][ep], half=half))
+        
+    if combine:
+        stacked_activs = {}
+        for key in activs[0]:
+            stacked_activs[key] = torch.hstack(
+                [activs[ep][key] for ep in range(len(activs))])
+        activs = stacked_activs
+    return activs
+
+
+def stack_activations(activation_dict, also_ret_list=False, half=False):
+    '''
+    Activations passed back from a FlexBase forward() call can be appended, e.g.
+    all_activations = []
+    for ...:
+        all_activations.append(actor_critic.act(..., with_activations=True)['activations'])
+        
+    This will result in a list of dictionaries
+    
+    This function converts all_activations constructed in this way into a dictionary,
+    where each value of the dictionary is a tensor of shape
+    [layer_num, seq_index, activation_size]
+    
+    Args:
+        also_ret_list: If True, will also return activations in a list one-by-one
+            rather than dict form. Good for matching up with labels and classifier ordering
+            from train classifiers function
+        half: use half precision to save space
+    '''
+    stacked_activations = defaultdict(list)
+    list_activations = []
+    keys = activation_dict[0].keys()
+    
+    for i in range(len(activation_dict)):
+        for key in keys:
+            num_layers = len(activation_dict[i][key])
+            
+            if num_layers > 0:
+                # activation: 1 x num_layers x activation_size
+                activation = torch.vstack(activation_dict[i][key]).reshape(1, num_layers, -1)
+                # stacked_activations: list (1 x num_layers x activation_size)
+                stacked_activations[key].append(activation)
+    
+    for key in stacked_activations:
+        activations = torch.vstack(stacked_activations[key]) # seq_len x num_layers x activation_size
+        activations = activations.transpose(0, 1) # num_layers x seq_len x activation_size
+        if half:
+            stacked_activations[key] = activations.half()
+        else:
+            stacked_activations[key] = activations
+        
+        #Generate activations in list form
+        if also_ret_list:
+            for i in range(activations.shape[0]):
+                list_activations.append(activations[i])
+    
+    if also_ret_list:
+        return stacked_activations, list_activations
+    else:
+        return stacked_activations
+    
+    
+def activs_list_to_dict(activs):
+    '''Convert a list of activs (1 dict per episode) into
+    a stacked dict'''
+    stack_activs = {}
+    for activ in activs:
+        for activ_type in activ:
+            if activ_type not in stack_activs:
+                stack_activs[activ_type] = []
+            stack_activs[activ_type].append(activ[activ_type])
+    
+    for activ_type in stack_activs:
+        stack_activs[activ_type] = torch.hstack(stack_activs[activ_type])
+    return stack_activs
+
+
+def comb_policy_res(shortcut_res, chk, vis_n=5, first_n_eps=50,
+                   dist_idx=1, get_activ2d=True, get_activ=False,
+                   activ_type='shared_activations', activ_layer=1):
+    '''
+    Combine shortcut_res['ns'] and shortcut_res['ws'] positions and 
+    activations
+    
+    vis_n: how many steps after seeing shortcut to consider
+    first_n_eps: how many eps were considered from each res type
+        (activ2d were computed using 50 so this should generally be fixed)
+    dist_idx: which min_dist umap to use (idx 0-3)
+        dists = [0.15, 0.25, 0.5, 0.75]
+    ret_all: whether to return vis, shortcut_avail, shortcut_used
+    
+    activ_type, activ_layer: used if get_activ is set to True
+    '''
+    res1 = shortcut_res['ns'][chk]
+    res2 = shortcut_res['ws'][chk]
+    pos1 = res1['ep_pos'][:first_n_eps]
+    pos2 = res2['ep_pos'][:first_n_eps]
+    pos = pos1+pos2
+
+    vis = res1['vis'][:first_n_eps] + res2['vis'][:first_n_eps]
+    shortcut = res1['shortcut'][:first_n_eps] + res2['shortcut'][:first_n_eps]
+    shortcut_used = [[check_shortcut_usage(p)] for p in pos1] + [[check_shortcut_usage(p)] for p in pos2]
+    color = vision_coloring(vis, shortcut, num_steps=vis_n)
+    
+    res = {
+        'color': color,
+        'ep_pos': pos,
+        'vis': vis,
+        'shortcut_avail': shortcut,
+        'shortcut_used': shortcut_used
+    }
+    
+    if get_activ2d:
+        activ2d = shortcut_res['activ2d'][chk][dist_idx]
+        res['activ2d'] = activ2d
+        
+    if get_activ:
+        activs1 = activs_list_to_dict(res1['activs'][:first_n_eps])
+        activs2 = activs_list_to_dict(res2['activs'][:first_n_eps])
+        activ1 = activs1[activ_type][activ_layer]
+        activ2 = activs2[activ_type][activ_layer]
+        res['activ'] = torch.vstack([activ1, activ2])
+        
+    return res
+
+'''
+================================================================
+Point coloring methods
+================================================================
+Methods for assigning points into predefined clusters based on
+where the agent was and the trajectory it ended up taking
+'''
+
+def decision_coloring(ep_vis, ep_shortcut, num_steps=10):
+    '''
+    Generate labels for points in trajectory num_steps after the shortcut is seen
+    and can be based on whether shortcut is used in the ep or available in the ep
+    '''
+    colorings = np.full(len(np.concatenate(ep_vis)), -1)
+    i = 0
+    for ep in range(len(ep_vis)):
+        if ep_shortcut[ep][0]:
+            label = 1 #shortcut available
+        else:
+            label = 0 #shortcut not available
+        first = np.argmax(ep_vis[ep])
+        
+        colorings[i:i+num_steps] = label
+        i += len(ep_vis[ep])
+    return colorings
+
+
+def vision_decision_coloring(ep_vis, ep_shortcut_avail, ep_shortcut_used, end=10, start=0,
+                             skip_late_sights=False):
+    '''
+    Generate labels for points in trajectory num_steps after the shortcut is seen, split into
+    labels of
+    0: no shortcut available
+    1: shortcut available and not taken
+    2: shortcut available and taken
+    
+    start: how many steps after seeing the shortcut to start considering
+    end: how many steps after seeing the shortcut to stop considering
+    skip_late_sights: if first sighting occurs above corridor, 
+    '''
+    colorings = np.full(len(np.concatenate(ep_vis)), -1)
+    i = 0
+    for ep in range(len(ep_vis)):
+        if not ep_shortcut_avail[ep][0]:
+            label = 0 #shortcut not available
+        else:
+            if ep_shortcut_used[ep][0]:
+                label = 2 #shortcut available and used
+            else:
+                label = 1 #shortcut available but not used
+        first = np.argmax(ep_vis[ep])
+        if i+start+first < 0:
+            colorings[:i+end+first] = label
+        else:
+            colorings[i+start+first:i+end+first] = label
+        i += len(ep_vis[ep])
+    return colorings
+
+
+
+def comparative_vision_decision_coloring(ep_vis, ep_shortcut_used, used=True, end=10, start=0):
+    '''
+    Very specific coloring: since our policy was tested on 50 eps of closed, 50 open,
+        use this to find the episodes where shortcut was closed, but on the corresponding
+        open episode the shortcut was used (or seen and not used)
+    E.g., if shortcut_used on ep 62, color episode 12 as True (the corresponding closed
+        shortcut episode).
+    used: if True, give episodes where shortcut was used. If False, give episodes
+        where shortcut was seen but not used
+    '''
+    colorings = np.full(len(np.concatenate(ep_vis)), -1)
+    
+    # Create a boolean array for corresponding closed shortcut episodes
+    eps = np.concatenate(ep_shortcut_used)[50:]
+    if not used:
+        eps = ~eps
+    eps = np.concatenate([eps, np.full((50,), False)])    
+    
+    i = 0
+    for ep in range(len(ep_vis)):
+        if eps[ep]:
+            label = 1 #shortcut not available
+            first = np.argmax(ep_vis[ep])        
+            colorings[i+start:i+end] = label
+        i += len(ep_vis[ep])
+    return colorings
+
+
+def decompose_shortcut_trajectories(res=None, ep_pos=None, ep_shortcut_used=None, ret_labels=True,
+                                   skip_start=True, top_right_only=False):
+    '''
+    Decompose trajectories in shortcut environment into "optimistic" clusters based on
+    where the agent was at each time step
+    
+    skip_start: don't make the first 5 steps a separate cluster, giving us a total of 4 unique clusters
+    top_right_only: if True, only consider right half of corridor. This makes red points better
+        intersect with purple ones
+    
+    Can either give res dictionary (which should 'ep_pos', 'pos', and 'shortcut_used')
+    or directly give an ep_pos and ep_shortcut (where shortcut is used in each ep) list
+    '''
+    if res is not None:
+        ep_pos = res['ep_pos']
+        ep_lens = get_ep_lens(ep_pos)
+        pos = res['pos']
+        ep_shortcut_used = np.array([e[0] for e in ep_split_res(res['shortcut_used'], ep_lens)])
+        num_steps = len(pos)
+    elif ep_pos is not None and ep_shortcut_used is not None:
+        num_steps = len(np.vstack(ep_pos))
+    else:
+        raise Exception('Either res or ep_pos+ep_shortcut_used must be given')
+        
+    if not skip_start:
+        # First 5 start points
+        ep_idxs = [np.arange(len(e)) for e in ep_pos]
+        ep_idxs = [e < 5 for e in ep_idxs]
+        start = np.concatenate(ep_idxs)
+    
+    if skip_start:
+        first = 0
+    else:
+        first = 5
+        
+    # In case ep_shortcut_used is a list of lists e.g., [[True], [False]]
+    #  let's convert it to just a list e.g., [True, False]
+    if type(ep_shortcut_used[0]) == list:
+        ep_shortcut_used = np.array(ep_shortcut_used).squeeze()
+        
+    # Leading to entrance - orange
+    ep_idxs = []
+    for ep in range(len(ep_pos)):
+        p = ep_pos[ep]
+        idxs = np.full(ep_pos[ep].shape[0], False)
+
+        first_above = np.argwhere(p[:, 1] > 250)
+        if len(first_above) > 0 and not ep_shortcut_used[ep]:
+            idxs[first:first_above[0, 0]] = True
+        ep_idxs.append(idxs)
+    before_entrance = np.concatenate(ep_idxs)
+        
+    # Leading to shortcut - green
+    ep_idxs = []
+    for ep in range(len(ep_pos)):
+        p = ep_pos[ep]
+        idxs = np.full(ep_pos[ep].shape[0], False)
+
+        first_above = np.argwhere(p[:, 1] > 250)
+        if len(first_above) > 0 and ep_shortcut_used[ep]:
+            idxs[first:first_above[0, 0]] = True
+        ep_idxs.append(idxs)
+    before_shortcut = np.concatenate(ep_idxs)
+    
+    # After entrance - red
+    ep_idxs = []
+    for ep in range(len(ep_pos)):
+        p = ep_pos[ep]
+        idxs = np.full(ep_pos[ep].shape[0], False)
+
+        if top_right_only:
+            first_above = np.argwhere((p[:, 1] > 250) & (p[:, 0] > 150))
+        else:
+            first_above = np.argwhere(p[:, 1] > 250)
+            
+        if len(first_above) > 0 and not ep_shortcut_used[ep]:
+            idxs[first_above[0, 0]:] = True
+        ep_idxs.append(idxs)
+    after_entrance = np.concatenate(ep_idxs)
+        
+    # After shortcut - purple
+    ep_idxs = []
+    for ep in range(len(ep_pos)):
+        p = ep_pos[ep]
+        idxs = np.full(ep_pos[ep].shape[0], False)
+
+        if top_right_only:
+            first_above = np.argwhere((p[:, 1] > 250) & (p[:, 0] > 150))
+        else:
+            first_above = np.argwhere(p[:, 1] > 250)
+        if len(first_above) > 0 and ep_shortcut_used[ep]:
+            idxs[first_above[0, 0]:] = True
+        ep_idxs.append(idxs)
+    after_shortcut = np.concatenate(ep_idxs)
+    
+    if skip_start:
+        no_cluster = ~(before_entrance | before_shortcut | after_entrance | after_shortcut)
+    else:
+        no_cluster = ~(start | before_entrance | before_shortcut | after_entrance | after_shortcut)
+    
+    if ret_labels:
+        labels = np.full(num_steps, -1)
+        
+        if skip_start:
+            first = 0
+        else:
+            labels[start] = 0
+            first = 1
+        labels[before_entrance] = 0 + first
+        labels[before_shortcut] = 1 + first
+        labels[after_entrance] = 2 + first
+        labels[after_shortcut] = 3 + first
+        return labels, no_cluster
+    else:
+        return [start, before_entrance, before_shortcut, after_entrance, after_shortcut], no_cluster
+
+def closed_seen_taken_coloring(ep_pos, ep_shortcut_avail, ep_shortcut_used, ignore_incomplete=True):
+    '''
+    Color trajectory points based on whether shortcut was closed/seen/taken,
+    and only consider points that are below the corridor
+    ignore_incomplete: Ignore episodes where the goal was not reached
+    '''
+    colorings = np.full(len(np.concatenate(ep_pos)), -1)
+    i = 0
+
+    # In case ep_shortcut_used is a list of lists e.g., [[True], [False]]
+    #  let's convert it to just a list e.g., [True, False]
+    if type(ep_shortcut_used[0]) == list:
+        ep_shortcut_used = np.array(ep_shortcut_used).squeeze()
+    if type(ep_shortcut_avail[0]) == list:
+        ep_shortcut_avail = np.array(ep_shortcut_avail).squeeze()
+
+    for ep in range(len(ep_pos)):
+        p = ep_pos[ep]
+        first_above = np.argwhere(p[:, 1] > 250)
+        if len(first_above) > 0:
+            first_above = first_above[0, 0]
+        else:
+            first_above = len(p) - 1
+            
+        if not ep_shortcut_avail[ep]:
+            label = 0 #shortcut not available
+        else:
+            if ep_shortcut_used[ep]:
+                label = 2 #shortcut available and used
+            else:
+                label = 1 #shortcut available but not used
+        
+        if ignore_incomplete and len(p) > 201:
+            label = -1 # goal not reached in time
+
+        colorings[i:i+first_above] = label
+            
+        i += len(p)
+
+    return colorings
+
+def closed_seen_taken_corridor(ep_pos, ep_shortcut_avail, ep_shortcut_used, top_right_only=True,
+                               ignore_incomplete=True):
+    '''
+    Color trajectory points based on whether shortcut was closed/seen/taken,
+    and only consider points that are above the corridor
+    ignore_incomplete: Ignore episodes where the goal was not reached
+    top_right_only: if True, only consider right half of corridor. This makes red points better
+        intersect with purple ones
+    '''
+    colorings = np.full(len(np.concatenate(ep_pos)), -1)
+    i = 0
+    
+    # In case ep_shortcut_used is a list of lists e.g., [[True], [False]]
+    #  let's convert it to just a list e.g., [True, False]
+    if type(ep_shortcut_used[0]) == list:
+        ep_shortcut_used = np.array(ep_shortcut_used).squeeze()
+    if type(ep_shortcut_avail[0]) == list:
+        ep_shortcut_avail = np.array(ep_shortcut_avail).squeeze()
+
+    for ep in range(len(ep_pos)):
+        p = ep_pos[ep]
+        
+        if top_right_only:
+            first_above = np.argwhere((p[:, 1] > 250) & (p[:, 0] > 150))
+        else:
+            first_above = np.argwhere(p[:, 1] > 250)
+
+        if len(first_above) > 0:
+            first_above = first_above[0, 0]
+        else:
+            first_above = len(p) - 1
+            
+        if not ep_shortcut_avail[ep]:
+            label = 0 #shortcut not available
+        else:
+            if ep_shortcut_used[ep]:
+                label = 2 #shortcut available and used
+            else:
+                label = 1 #shortcut available but not used
+        
+        if ignore_incomplete and len(p) > 201:
+            label = -1 # goal not reached in time
+
+        colorings[i+first_above:i+len(p)] = label
+            
+        i += len(p)
+
+    return colorings
+    
+
+'''
+================================================================
+Shortcut analysis functions
+================================================================
+Used for determining performance of an agent in the shortcut environment
+Most importantly check_shortcut_usage()
+'''
 
 def get_moves_to_target(start_pos, target_pos, start_angle, perfect_angle=False):
     '''
@@ -113,13 +829,40 @@ def check_shortcut_usage(p, ret_arrays=False):
 
 
 
-def test_shortcut_agent(model, obs_rms, character_reset_pos=0, n_eps=20):
-    env_kwargs = {'character_reset_pos': character_reset_pos, 'shortcut_probability': 1.}
-    res1 = evaluate(model, obs_rms, env_kwargs=env_kwargs, env_name='ShortcutNav-v0',
+
+'''
+================================================================
+Evaluation helper functions
+================================================================
+Some functions that help perform evaluations, although we end up not using these very often
+'''
+
+def test_shortcut_use_rate(model, obs_rms, character_reset_pos=3, n_eps=100, env_kwargs={}):
+    kw = {'character_reset_pos': character_reset_pos, 'shortcut_probability': 1.}
+    envkw = env_kwargs.copy()
+    for key, value in kw.items():
+        envkw[key] = value
+    res1 = evaluate(model, obs_rms, env_kwargs=envkw, env_name='ShortcutNav-v0',
+                  num_episodes=n_eps, data_callback=shortcut_data_callback)
+    shortcuts_used = np.array([check_shortcut_usage(p) for p in res1['data']['pos']])
+    return np.sum(shortcuts_used) / n_eps
+
+
+def test_shortcut_agent(model, obs_rms, character_reset_pos=0, n_eps=20, env_kwargs={}):
+    '''base_env_kwargs: env_kwargs to change for the agent - e.g. wall_colors'''
+
+    kw = {'character_reset_pos': character_reset_pos, 'shortcut_probability': 1.}
+    envkw = env_kwargs.copy()
+    for key, value in kw.items():
+        envkw[key] = value
+    res1 = evaluate(model, obs_rms, env_kwargs=envkw, env_name='ShortcutNav-v0',
                   num_episodes=n_eps, data_callback=shortcut_data_callback)
 
-    env_kwargs = {'character_reset_pos': character_reset_pos, 'shortcut_probability': 0}
-    res2 = evaluate(model, obs_rms, env_kwargs=env_kwargs, env_name='ShortcutNav-v0',
+    kw = {'character_reset_pos': character_reset_pos, 'shortcut_probability': 0}
+    envkw = env_kwargs.copy()
+    for key, value in kw.items():
+        envkw[key] = value
+    res2 = evaluate(model, obs_rms, env_kwargs=envkw, env_name='ShortcutNav-v0',
                   num_episodes=n_eps, data_callback=shortcut_data_callback)
 
     # Check how often shortcuts were used when available
@@ -157,10 +900,6 @@ def test_shortcut_agent(model, obs_rms, character_reset_pos=0, n_eps=20):
         'path_starts': path_starts
     }
 
-
-from sklearn.cluster import KMeans
-from sklearn.metrics import silhouette_score
-
 def shortcut_color_pos(pos):
     rectangles = [ #each rectangle given by x1, x2, y1, y2
         [0, 125, 250, 300], #red
@@ -192,71 +931,123 @@ def shortcut_color_pos(pos):
         'colors': colors
     }
 
-def test_shortcut_activations(exp_string='shortcutnav_fcp{prob}reset{reset}batch{batch}',
-                              prob=0.1, reset=3, batch=64, trial=0, chk=300,
-                              umap_min_dist=0.5, skip_activs=True, skip_umap=True):
-    exp_name = exp_string.format(prob=prob, reset=reset, batch=batch)
-    model, obs_rms = load_chk(exp_name, chk, trial) #note that this load has a subfolder baked in
+def test_shortcut_activations(model=None, obs_rms=None, exp_string='shortcutnav_fcp{prob}reset{reset}batch{batch}',
+                              prob=0.1, reset=3, batch=64, trial=0, exp_name=None, chk=300,
+                              umap_min_dist=0.75, skip_activs=True, skip_umap=True, subdir='shortcut_resets',
+                              env_kwargs={}, forced_actions=None, seed=None, test_only=False,
+                              shortcut_probability=0.5, data_callback=shortcut_data_callback):
+    
+    if model is None:
+        if exp_name is None:
+            exp_name = exp_string.format(prob=prob, reset=reset, batch=batch)
+        model, obs_rms = load_chk(exp_name, chk, trial, subdir=subdir)
     
     
-    shortcut_res = test_shortcut_agent(model, obs_rms, reset)
+    # shortcut_res = test_shortcut_agent(model, obs_rms, reset, env_kwargs=env_kwargs)
+    shortcut_use_rate = test_shortcut_use_rate(model, obs_rms, reset, env_kwargs=env_kwargs)
     
-    env_kwargs = {'character_reset_pos': reset, 'shortcut_probability': 0.5}
-    res = evaluate(model, obs_rms, env_name='ShortcutNav-v0', env_kwargs=env_kwargs,
-                   data_callback=shortcut_data_callback, with_activations=True,
-                   num_episodes=100)
+    kw = {'character_reset_pos': reset, 'shortcut_probability': shortcut_probability}
+    envkw = env_kwargs.copy()
+    for key, value in kw.items():
+        envkw[key] = value
+    
+    if forced_actions is None:
+        res = evaluate(model, obs_rms, env_name='ShortcutNav-v0', env_kwargs=envkw,
+                    data_callback=data_callback, with_activations=True,
+                       num_episodes=100, seed=seed)
+    elif forced_actions is True:
+        fa = pickle.load(open('data/shortcut/forced_actions', 'rb'))
+        forced_actions = fa['forced_actions']
+        seed = fa['seed']
 
+        res = forced_action_evaluate(model, obs_rms, env_name='ShortcutNav-v0', env_kwargs=envkw,
+                    data_callback=data_callback, with_activations=True,
+                       num_episodes=100, forced_actions=forced_actions, seed=seed)
+    else:
+        res = forced_action_evaluate(model, obs_rms, env_name='ShortcutNav-v0', env_kwargs=envkw,
+                    data_callback=data_callback, with_activations=True,
+                       num_episodes=100, forced_actions=forced_actions, seed=seed)
+        
+    
     # Process activations
-    activs = ep_stack_activations(res, True)
-    activ = activs['shared_activations'][1]
+    activs = ep_stack_activations(res, False)
     ep_pos = res['data']['pos']
     pos = np.vstack(ep_pos)
     angle = np.vstack(res['data']['angle']).reshape(-1)
-    # activ = torch.hstack([a['shared_activations'] for a in activs])[1]
-    umap = UMAP(min_dist=umap_min_dist)
-    activ2d = umap.fit_transform(activ)
+    activ = torch.hstack([a['shared_activations'] for a in activs])[1]
     
-    xlim1, ylim1 = activ2d.min(axis=0)
-    xlim2, ylim2 = activ2d.max(axis=0)
-    norm_activ2d = activ2d.copy()
-    norm_activ2d[:, 0] = (norm_activ2d[:, 0] - xlim1) / (xlim2 - xlim1)
-    norm_activ2d[:, 1] = (norm_activ2d[:, 1] - ylim1) / (ylim2 - ylim1)
-
     # Process shortcut availability and whether it was used
     ep_shortcut_avail = []
     ep_shortcut_used = []
+    
+    ep_shortcut_used_single = []
+    ep_shortcut_avail_single = []
     for i in range(len(activs)):
         num_steps = activs[i]['shared_activations'].shape[1]
         ep_shortcut_avail.append(np.full((num_steps, 1), res['data']['shortcut'][i][0]))
         shortcut_used = check_shortcut_usage(ep_pos[i])
         ep_shortcut_used.append(np.full((num_steps, 1), shortcut_used))
+        
+        ep_shortcut_avail_single.append(res['data']['shortcut'][i][0])
+        ep_shortcut_used_single.append(shortcut_used)
+        
     shortcut_avail = np.vstack(ep_shortcut_avail).reshape(-1)
     shortcut_used = np.vstack(ep_shortcut_used).reshape(-1)
     
-    chunks = shortcut_color_pos(pos)
     
-    data = {
-        'ep_pos': res['data']['pos'],
-        'pos': pos,
-        'angle': angle,
-        'actions': np.vstack(res['actions']).reshape(-1),
-        'activ2d': activ2d,
-        'shortcut_avail': shortcut_avail,
-        'shortcut_used': shortcut_used,
-        'pos_chunks': chunks,
-        'shortcut_use_rate': shortcut_res['shortcut_use_rate']
-    }
-    if not skip_activs:
-        activs = ep_stack_activations(res, True)
-        data['activs'] = activs
-    if not skip_umap:
-        data['umap'] = umap
+    if not test_only:
+        umap = UMAP(min_dist=umap_min_dist)
+        activ2d = umap.fit_transform(activ)
+        
+        xlim1, ylim1 = activ2d.min(axis=0)
+        xlim2, ylim2 = activ2d.max(axis=0)
+        norm_activ2d = activ2d.copy()
+        norm_activ2d[:, 0] = (norm_activ2d[:, 0] - xlim1) / (xlim2 - xlim1)
+        norm_activ2d[:, 1] = (norm_activ2d[:, 1] - ylim1) / (ylim2 - ylim1)
+        
+        chunks = shortcut_color_pos(pos)
+    
+        data = {
+            'ep_pos': res['data']['pos'],
+            'pos': pos,
+            'angle': angle,
+            'actions': np.vstack(res['actions']).reshape(-1),
+            'activ2d': activ2d,
+            'shortcut_avail': shortcut_avail,
+            'shortcut_used': shortcut_used,
+            'ep_shortcut_used': ep_shortcut_used_single,
+            'ep_shortcut_avail': ep_shortcut_avail_single,
+            'pos_chunks': chunks,
+            'shortcut_use_rate': shortcut_use_rate,
+        }
+        if not skip_activs:
+            activs = ep_stack_activations(res, True)
+            data['activs'] = activs
+        if not skip_umap:
+            data['umap'] = umap
+            
+    else:
+        data = {
+            'ep_pos': res['data']['pos'],
+            'pos': pos,
+            'angle': angle,
+            'actions': np.vstack(res['actions']).reshape(-1),
+            'shortcut_avail': shortcut_avail,
+            'shortcut_used': shortcut_used,
+            'ep_shortcut_used': ep_shortcut_used_single,
+            'ep_shortcut_avail': ep_shortcut_avail_single,
+        }
+        if not skip_activs:
+            activs = ep_stack_activations(res, True)
+            data['activs'] = activs
+
     return data
 
 
 def test_shortcut_activations_chks(exp_string='shortcutnav_fcp{prob}reset{reset}batch{batch}',
-                              prob=0.1, reset=3, batch=64, trial=0, chks=[40, 70, 100, 150, 200, 300, 400],
-                              verbose=1, umap_min_dist=0.5):
+                              prob=0.1, reset=3, batch=64, trial=0, exp_name=None, chks=[40, 70, 100, 150, 200, 300, 400],
+                              verbose=1, umap_min_dist=0.5, subdir='shortcut_resets', skip_activs=True,
+                              env_kwargs={}, forced_actions=None, seed=None, test_only=False, shortcut_probability=0.5):
     all_shortcut_res = []
     
     if verbose > 0:
@@ -265,7 +1056,10 @@ def test_shortcut_activations_chks(exp_string='shortcutnav_fcp{prob}reset{reset}
     for chk in chks:
         shortcut_res = test_shortcut_activations(exp_string=exp_string, 
                                                  prob=prob, reset=reset, batch=batch,
-                                                 trial=trial, chk=chk, umap_min_dist=umap_min_dist)
+                                                 trial=trial, chk=chk, exp_name=exp_name, 
+                                                umap_min_dist=umap_min_dist, subdir=subdir, skip_activs=skip_activs,
+                                                env_kwargs=env_kwargs, forced_actions=forced_actions,
+                                                seed=seed, test_only=test_only, shortcut_probability=shortcut_probability)
         all_shortcut_res.append(shortcut_res)
     return all_shortcut_res
 
@@ -329,6 +1123,24 @@ def plot_shortcut_umap(shortcut_res, plot_type=0, ax=None, normalize=True):
         return score
     
     
+def save_forced_actions(res, seed):
+    '''Take a trajectory res and format into a forced action dict that can be saved'''
+    if 'ep_pos' not in res and 'ep_actions' not in res and 'ep_lens' not in res:
+        raise Exception('Need some sort of ep_lens, ep_pos, or ep_actions to work with')
+    
+    if 'ep_actions' not in res:
+        if 'ep_lens' not in res:
+            ep_lens = get_ep_lens(res['ep_pos'])
+        ep_actions = ep_split_res(res['actions'], ep_lens)
+        
+    forced_actions = dict(zip(range(100), ep_actions))
+    fa = {
+        'forced_actions': forced_actions,
+        'seed': seed,
+    }
+    return fa
+    
+    
 def normalize_umap(um2d):
     xlim1, ylim1 = um2d.min(axis=0)
     xlim2, ylim2 = um2d.max(axis=0)
@@ -359,17 +1171,7 @@ def compute_shortcut_silhouette(shortcut_res):
 n_clusters = 5
 cluster_labels = ['Start', 'Entrance', 'Shortcut', 'Corridor Entrance', 'Near Platform']
 
-def get_ep_lens(ep_pos):
-    ep_lens = [len(ep) for ep in ep_pos]
-    return ep_lens
 
-def ep_split_res(target, ep_lens):
-    data = []
-    cur_idx = 0
-    for l in ep_lens:
-        data.append(target[cur_idx:cur_idx+l])
-        cur_idx += l
-    return data
 
 
 def kmeans_activ_pos_plot(pos, activ2d, labels=None, ax=None, n_clusters=5, km=None):
@@ -400,7 +1202,59 @@ def kmeans_activ_pos_plot(pos, activ2d, labels=None, ax=None, n_clusters=5, km=N
         
     if format_ax:
         ax[1:].format(xlim=[0, 300], ylim=[0, 300])
+      
+
+
+
+'''
+================================================================
+Predefined cluster methods
+================================================================
+Different method of "clustering" UMAP activations by finding which points belong
+to predefined clusters based on where the agent was
+Then, analyze based on how well separated the clusters are
+'''
+
+
+def pairwise_silscore_plot(silscores, ax=None, vmax=None, draw_cbar=True):
+    '''Plot pairwise silhouette scores from pairwise_silhouette_score into
+    a heatmap with text inside each block showing the numerical value
+    
+    vmax: Give this for a manual vmax. Note that we assume a vmin of 0
+    draw_cbar: determine whether a colorbar should be drawn. This can be turned
+        off if making multiple subplots and drawing a shared cbar
+    '''
+    if ax is None:
+        fig, ax = pplt.subplots()
+    
+    if vmax is None:
+        max_score = np.max(silscores)
+    else:
+        max_score = vmax
+    cbar = ax.imshow(silscores, vmax=vmax)
+    if draw_cbar:
+        ax.colorbar(cbar)
+
+    for i, j in itertools.product(range(5), range(5)):
+        if j <= i:
+            continue
+        score = silscores[i, j]
+        color = 'white' if score > (max_score/2) else 'black'
+        ax.text(j, i, f'{score:.2f}', ha='center', va='center', color=color)
+
+    ax.format(xformatter=['Start', 'Early Entr.', 'Early Short.','Corr. Entr.', 'Corr. Short.'], xlocator=range(5),
+              xrotation=45,
+              yformatter=['Start', 'Early Entr.', 'Early Short.','Corr. Entr.', 'Corr. Short.'], ylocator=range(5))
+
+    return cbar
+
+      
         
+'''
+================================================================
+KMeans clustering methods
+================================================================
+'''        
         
         
 def shortcut_km_cluster_prob2(ep_labels, pos):
@@ -549,6 +1403,7 @@ def shortcut_cluster_analysis(s, normalize=True):
         relabelled_centers[relabel_map[i]] = km.cluster_centers_[i]
         
     res['labels'] = labels
+    res['ep_labels'] = ep_split_res(labels, ep_lens)
     res['cluster_centers'] = relabelled_centers
     
     t = res['reordered_transition_probs'].copy()
@@ -565,24 +1420,4 @@ def shortcut_cluster_analysis(s, normalize=True):
     res['activ2d'] = activ2d
     return res
 
-
-def linear_bestfit(x, y):
-    if type(x) == list:
-        x = np.array(x)
-    if type(y) == list:
-        y = np.array(y)
-    
-    if len(x.shape) == 1:
-        x = x.reshape(-1, 1)
-    
-    lr = LinearRegression().fit(x, y)
-    y_pred = lr.predict(x)
-    
-    x_min, x_max = x.min(), x.max()
-    r2 = r2_score(y, y_pred)
-    
-    xs = np.array([x_min, x_max]).reshape(-1, 1)
-    ys = lr.predict(xs)
-    
-    return xs, ys, r2
 

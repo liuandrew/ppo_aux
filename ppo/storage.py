@@ -162,6 +162,31 @@ class RolloutStorage(object):
                 adv_targ, auxiliary_pred_batch, auxiliary_truth_batch
 
     def recurrent_generator(self, advantages, num_mini_batch):
+        '''
+        Generator works by first finding number of envs per mini-batch, by
+            num_envs_per_batch = num_processes // num_mini_batch
+        E.g., if 100 processes and 10 mini_batch, split a full batch into 10 minis
+        
+        Next, randomly select num_envs_per_batch to generate the minibatch
+            All num_steps for that environment will be grabbed for the minibatch
+            So total number of steps in the mini is num_steps * num_envs_per_batch
+        E.g., if 64 num_steps (that's how many steps are collected per process per update)
+            and 10 num_envs_per_batch, the mini has 640 steps total
+            
+        Each of the batch pieces passed back are of size [T, N, dim], where 
+            T = num_steps
+            N = num_envs_per_batch
+            dim = dependent on thing (e.g., action/rewards have dim 1, obs has dim obs_dim)
+        And they will be flattened to [T*N, dim] tensors to be passed back
+        
+        EXCEPT: for rnn_hxs, which is a [N, dim] tensor, since the update step
+            will recompute recurrent network dependencies every forward pass before backward gradients
+        
+        Key takeaway: all batches passed back have size [T*N, dim]
+            _forward_gru calls will unflatten and handle
+            
+        
+        '''
         num_processes = self.rewards.size(1)
         assert num_processes >= num_mini_batch, (
             "PPO requires the number of processes ({}) "

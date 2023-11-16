@@ -179,19 +179,24 @@ But in case the seeding for angles doesn't work, we save them to be consistent
 # grid_points = np.array([x.reshape(-1), y.reshape(-1)]).T
 # grid_angles = np.random.uniform(-np.pi, np.pi, size=len(grid_points))
 
-grid_points, grid_angles = pickle.load(open('data/explore/grid_starts', 'rb'))
-actions = pickle.load(open('data/explore/copy_explore_actions', 'rb'))
 
 # small set of trajectories, a bit of angle inconsistency in the middle
-copy_key = ['batch128_64', 'batch128_128', '_64']
-copy_t = [0, 1, 0]
-
-# fairly evened out but one long angle bar diagonal
-copy_key = ['batch128_64', 'batch128_128', '_64', '_128', '_128']
-copy_t = [0, 1, 0, 0, 1]
+# copy_key = ['batch128_64', 'batch128_128', '_64']
+# copy_t = [0, 1, 0]
 
 # copy_key = ['batch128_64', 'batch128_64', 'batch128_128', '_64', '_128', '_128']
 # copy_t = [0, 2, 1, 0, 0, 1]
+
+
+'''
+Final - uncomment if using
+'''
+# grid_points, grid_angles = pickle.load(open('data/explore/grid_starts', 'rb'))
+# actions = pickle.load(open('data/explore/copy_explore_actions', 'rb'))
+
+# # fairly evened out but one long angle bar diagonal
+# copy_key = ['batch128_64', 'batch128_128', '_64', '_128', '_128']
+# copy_t = [0, 1, 0, 0, 1]
 
 
 def test_forced_search_activations(model, obs_rms, env_kwargs, save=None):
@@ -274,24 +279,24 @@ def combine_evaluation_results(ress):
     
     
     
-def ep_stack_activations(res, combine=False):
-    '''Stack activations dictionaries from episodic evaluation calls
+# def ep_stack_activations(res, combine=False):
+#     '''Stack activations dictionaries from episodic evaluation calls
     
-    combine: whether to combine all activations so there are no episodic separations
-    returns: list of dictionaries
-        Ex. activs[ep]['shared_activations'][layer_num]
-    '''    
-    activs = []
-    for ep in range(len(res['activations'])):
-        activs.append(stack_activations(res['activations'][ep]))
+#     combine: whether to combine all activations so there are no episodic separations
+#     returns: list of dictionaries
+#         Ex. activs[ep]['shared_activations'][layer_num]
+#     '''    
+#     activs = []
+#     for ep in range(len(res['activations'])):
+#         activs.append(stack_activations(res['activations'][ep]))
         
-    if combine:
-        stacked_activs = {}
-        for key in activs[0]:
-            stacked_activs[key] = torch.hstack(
-                [activs[ep][key] for ep in range(len(activs))])
-        activs = stacked_activs
-    return activs
+#     if combine:
+#         stacked_activs = {}
+#         for key in activs[0]:
+#             stacked_activs[key] = torch.hstack(
+#                 [activs[ep][key] for ep in range(len(activs))])
+#         activs = stacked_activs
+#     return activs
 
 
 

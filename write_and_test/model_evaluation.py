@@ -329,6 +329,8 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
 
     all_obs = []
     all_actions = []
+    all_action_log_probs = []
+    all_action_probs = []
     all_rewards = []
     all_rnn_hxs = []
     all_dones = []
@@ -342,6 +344,8 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
     
     ep_obs = []
     ep_actions = []
+    ep_action_log_probs = []
+    ep_action_probs = []
     ep_rewards = []
     ep_rnn_hxs = []
     ep_dones = []
@@ -359,7 +363,7 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
         num_processes, actor_critic.recurrent_hidden_state_size, device=device)
     masks = torch.zeros(num_processes, 1, device=device)
 
-    for i in range(num_episodes):
+    for ep in range(num_episodes):
         step = 0
         while True:
             ep_obs.append(obs)
@@ -369,6 +373,7 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
                     obs, [], [], [False], data, first=True)
 
             with torch.no_grad():
+                
                 outputs = actor_critic.act(obs, rnn_hxs, 
                                         masks, deterministic=deterministic,
                                         with_activations=with_activations)
@@ -377,11 +382,19 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
                 elif type(forced_actions) in [int, float]:
                     action = torch.full((num_processes, 1), forced_actions)
                 elif type(forced_actions) in [list, np.ndarray]:
-                    action = torch.full((num_processes, 1), forced_actions[step])
+                    # Can give partial episodes - after actions run out will use outputs
+                    if step >= len(forced_actions):
+                        action = outputs['action']
+                    else:
+                        action = torch.full((num_processes, 1), forced_actions[step])
+                    
                 elif type(forced_actions) == type(lambda:0):
                     actions = [torch.tensor(forced_actions(step)) for i in range(num_processes)]
                     action = torch.vstack(actions) 
-                            
+                elif type(forced_actions) == dict:
+                    # special case: assume a dict where each episode's actions are laid out
+                    action = torch.full((num_processes, 1), forced_actions[ep][step])
+                                                
                 rnn_hxs = outputs['rnn_hxs']
             obs, reward, done, infos = envs.step(action)
             
@@ -391,6 +404,8 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
                 device=device)
             
             ep_actions.append(action)
+            ep_action_log_probs.append(outputs['action_log_probs'])
+            ep_action_probs.append(outputs['probs'])
             ep_rewards.append(reward)
             ep_dones.append(done)
             ep_values.append(outputs['value'])
@@ -432,6 +447,8 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
             if done[0]:
                 all_obs.append(np.vstack(ep_obs))
                 all_actions.append(np.vstack(ep_actions))
+                all_action_log_probs.append(np.vstack(ep_action_log_probs))
+                all_action_probs.append(np.vstack(ep_action_probs))
                 all_rewards.append(np.vstack(ep_rewards))
                 all_rnn_hxs.append(np.vstack(ep_rnn_hxs))
                 all_dones.append(np.vstack(ep_dones))
@@ -452,6 +469,8 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
                     
                 ep_obs = []
                 ep_actions = []
+                ep_action_log_probs = []
+                ep_action_probs = []
                 ep_rewards = []
                 ep_rnn_hxs = []
                 ep_dones = []
@@ -478,6 +497,273 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
     return {
         'obs': all_obs,
         'actions': all_actions,
+        'action_log_probs': all_action_log_probs,
+        'action_probs': all_action_probs,
+        'rewards': all_rewards,
+        'rnn_hxs': all_rnn_hxs,
+        'dones': all_dones,
+        'masks': all_masks,
+        'envs': envs,
+        'data': data,
+        'activations': all_activations,
+        'values': all_values,
+        'actor_features': all_actor_features,
+        'auxiliary_preds': all_auxiliary_preds,
+        'auxiliary_truths': all_auxiliary_truths,
+    }
+    
+    
+    
+def hallucination_evaluate(actor_critic, obs_rms=None, normalize=True, forced_actions=None,
+            env_name='NavEnv-v0', seed=None, num_processes=1,
+             device=torch.device('cpu'), ret_info=1, capture_video=False, env_kwargs={}, data_callback=None,
+             num_episodes=10, verbose=0, with_activations=False, deterministic=True,
+             aux_wrapper_kwargs={}, auxiliary_truth_sizes=[],
+             eval_log_dir=None, video_folder='./video', hallucinator=None):
+    '''
+    ret_info: level of info that should be tracked and returned
+    capture_video: whether video should be captured for episodes
+    env_kwargs: any kwargs to create environment with
+    data_callback: a function that should be called at each step to pull information
+        from the environment if needed. The function will take arguments
+            def callback(actor_critic, vec_envs, recurrent_hidden_states, data):
+        actor_critic: the actor_critic network
+        vec_envs: the vec envs (can call for example vec_envs.get_attr('objects') to pull data)
+        recurrent_hidden_states: these are given in all data, but may want to use in computation
+        obs: observation this step (after taking action) - 
+            note that initial observation is never seen by data_callback
+            also note that this observation will have the mean normalized
+            so may instead want to call vec_envs.get_method('get_observation')
+        action: actions this step
+        reward: reward this step
+        data: a data dictionary that will continuously be passed to be updated each step
+            it will start as an empty dicionary, so keys must be initialized
+        see below at example_data_callback in this file for an example
+    hallucinator: an object with hallucination check and hallucinations passed
+    '''
+
+    if seed is None:
+        seed = np.random.randint(0, 1e9)
+
+    envs = make_vec_envs(env_name, seed + num_processes, num_processes,
+                              None, eval_log_dir, device, True, 
+                              capture_video=capture_video, 
+                              env_kwargs=env_kwargs, normalize=normalize,
+                              video_folder=video_folder,
+                              **aux_wrapper_kwargs)
+
+    vec_norm = utils.get_vec_normalize(envs)
+    if vec_norm is not None:
+        vec_norm.eval()
+        vec_norm.obs_rms = obs_rms
+
+    eval_episode_rewards = []
+
+    all_obs = []
+    all_actions = []
+    all_action_log_probs = []
+    all_action_probs = []
+    all_rewards = []
+    all_rnn_hxs = []
+    all_dones = []
+    all_masks = []
+    all_activations = []
+    all_values = []
+    all_actor_features = []
+    all_auxiliary_preds = []
+    all_auxiliary_truths = []
+    data = {}
+    
+    ep_obs = []
+    ep_actions = []
+    ep_action_log_probs = []
+    ep_action_probs = []
+    ep_rewards = []
+    ep_rnn_hxs = []
+    ep_dones = []
+    ep_values = []
+    ep_masks = []
+    ep_actor_features = []
+    
+    ep_auxiliary_preds = []
+    ep_activations = []
+    ep_auxiliary_truths = []
+    
+
+    obs = envs.reset()
+    rnn_hxs = torch.zeros(
+        num_processes, actor_critic.recurrent_hidden_state_size, device=device)
+    masks = torch.zeros(num_processes, 1, device=device)
+
+    for ep in range(num_episodes):
+        step = 0
+        while True:
+            
+            # Check for hallucination
+            if hallucinator and hallucinator.check_for_hallucination(step, envs, data):
+                h_obs = hallucinator.get_hallucination()
+                ep_obs.append(h_obs)
+                ep_rnn_hxs.append(rnn_hxs)
+                if data_callback is not None and step == 0:
+                    data = data_callback(None, envs, rnn_hxs,
+                        obs, [], [], [False], data, first=True)
+
+                with torch.no_grad():
+                    outputs = actor_critic.act(obs, rnn_hxs, 
+                                            masks, deterministic=deterministic,
+                                            with_activations=with_activations)
+                rnn_hxs = outputs['rnn_hxs']
+                masks = torch.tensor([[1.0]], dtype=torch.float32, device=device)
+                action = None
+                reward = 0
+                done = [False]
+                infos = [{}]
+                
+                ep_actions.append(action)
+                ep_action_log_probs.append(outputs['action_log_probs'])
+                ep_action_probs.append(outputs['probs'])
+                ep_rewards.append(reward)
+                ep_dones.append(done)
+                ep_values.append(outputs['value'])
+                ep_masks.append(masks)
+                ep_actor_features.append(outputs['actor_features'])
+
+            else:            
+                ep_obs.append(obs)
+                ep_rnn_hxs.append(rnn_hxs)
+                if data_callback is not None and step == 0:
+                    data = data_callback(None, envs, rnn_hxs,
+                        obs, [], [], [False], data, first=True)
+
+                with torch.no_grad():
+                    outputs = actor_critic.act(obs, rnn_hxs, 
+                                            masks, deterministic=deterministic,
+                                            with_activations=with_activations)
+                    if forced_actions is None:
+                        action = outputs['action']
+                    elif type(forced_actions) in [int, float]:
+                        action = torch.full((num_processes, 1), forced_actions)
+                    elif type(forced_actions) in [list, np.ndarray]:
+                        # Can give partial episodes - after actions run out will use outputs
+                        if step >= len(forced_actions):
+                            action = outputs['action']
+                        else:
+                            action = torch.full((num_processes, 1), forced_actions[step])
+                        
+                    elif type(forced_actions) == type(lambda:0):
+                        actions = [torch.tensor(forced_actions(step)) for i in range(num_processes)]
+                        action = torch.vstack(actions) 
+                    elif type(forced_actions) == dict:
+                        # special case: assume a dict where each episode's actions are laid out
+                        action = torch.full((num_processes, 1), forced_actions[ep][step])
+                                                    
+                    rnn_hxs = outputs['rnn_hxs']
+                obs, reward, done, infos = envs.step(action)
+            
+                masks = torch.tensor(
+                    [[0.0] if done_ else [1.0] for done_ in done],
+                    dtype=torch.float32,
+                    device=device)
+                
+                ep_actions.append(action)
+                ep_action_log_probs.append(outputs['action_log_probs'])
+                ep_action_probs.append(outputs['probs'])
+                ep_rewards.append(reward)
+                ep_dones.append(done)
+                ep_values.append(outputs['value'])
+                ep_masks.append(masks)
+                ep_actor_features.append(outputs['actor_features'])
+                
+            if 'auxiliary_preds' in outputs:
+                ep_auxiliary_preds.append(outputs['auxiliary_preds'])
+            
+            if with_activations:
+                ep_activations.append(outputs['activations'])
+
+            if data_callback is not None:
+                data = data_callback(None, envs, rnn_hxs,
+                    obs, action, reward, done, data)
+            else:
+                data = {}
+                
+            auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
+            for info in infos:
+                if 'auxiliary' in info and len(info['auxiliary']) > 0:
+                    for i, aux in enumerate(info['auxiliary']):
+                        auxiliary_truths[i].append(aux)
+            if len(auxiliary_truths) > 0:
+                auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
+            ep_auxiliary_truths.append(auxiliary_truths)
+            
+            
+            # for info in infos:
+            #     if 'episode' in info.keys():
+            #         eval_episode_rewards.append(info['episode']['r'])
+            #         #Andy: add verbosity option
+            #         if verbose >= 2:
+            #             print('ep ' + str(len(eval_episode_rewards)) + ' rew ' + \
+            #                 str(info['episode']['r']))
+            
+            step += 1
+            
+            if done[0]:
+                all_obs.append(np.vstack(ep_obs))
+                all_actions.append(np.vstack(ep_actions))
+                all_action_log_probs.append(np.vstack(ep_action_log_probs))
+                all_action_probs.append(np.vstack(ep_action_probs))
+                all_rewards.append(np.vstack(ep_rewards))
+                all_rnn_hxs.append(np.vstack(ep_rnn_hxs))
+                all_dones.append(np.vstack(ep_dones))
+                all_masks.append(np.vstack(ep_masks))
+                all_values.append(np.vstack(ep_values))
+                all_actor_features.append(np.vstack(ep_actor_features))
+                
+                all_auxiliary_preds.append(ep_auxiliary_preds)
+                all_activations.append(ep_activations)
+                all_auxiliary_truths.append(ep_auxiliary_truths)
+
+                if data_callback is not None:
+                    data = data_callback(None, envs, rnn_hxs,
+                        obs, action, reward, done, data, stack=True)
+                          
+                if verbose >= 2:
+                    print(f'ep {i}, rew {np.sum(ep_rewards)}' )
+                    
+                ep_obs = []
+                ep_actions = []
+                ep_action_log_probs = []
+                ep_action_probs = []
+                ep_rewards = []
+                ep_rnn_hxs = []
+                ep_dones = []
+                ep_values = []
+                ep_masks = []
+                ep_actor_features = []
+                
+                ep_auxiliary_preds = []
+                ep_activations = []
+                ep_auxiliary_truths = []
+                
+                step = 0
+                
+                if hallucinator:
+                    hallucinator.reset()
+                
+                break
+            
+            
+  
+
+    envs.close()
+    if verbose >= 1:
+        print(" Evaluation using {} episodes: mean reward {:.5f}\n".format(
+            len(eval_episode_rewards), np.mean(eval_episode_rewards)))
+
+    return {
+        'obs': all_obs,
+        'actions': all_actions,
+        'action_log_probs': all_action_log_probs,
+        'action_probs': all_action_probs,
         'rewards': all_rewards,
         'rnn_hxs': all_rnn_hxs,
         'dones': all_dones,
