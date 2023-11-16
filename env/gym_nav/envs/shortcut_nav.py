@@ -420,7 +420,7 @@ class ShortcutNavEnv(gym.Env):
                 separate_aux_tasks=False, poster_thickness=None,
                 render_character=True, wall_thickness=None,
                 one_hot_obs=True, shortcut_probability=0.2,
-                wall_colors=4, shortcut_config=1):
+                wall_colors=4, shortcut_config=1, plum_steps=0):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
@@ -482,6 +482,8 @@ class ShortcutNavEnv(gym.Env):
         wall_thickness: if given a value, set wall thickness to that value
         one_hot_obs: wheter to set colors to be a one-hot encoded vector
             If False, colors are evenly spaced float values between 0 and 1, spaced by 7 possible values
+        plum_steps: if transfering from a PlumNav env, how many steps to show a plum at the goal for
+            to teach the agent where the goal is
         '''
         super(ShortcutNavEnv, self).__init__()
 
@@ -536,6 +538,8 @@ class ShortcutNavEnv(gym.Env):
         self.wall_colors = wall_colors
         self.shortcut_config = shortcut_config
         self.shortcuts_available = [False]
+        self.plum_steps = plum_steps
+        self.universal_step = 0
         
         observation_width = num_rays
         self.ray_obs_width = num_rays
@@ -1022,13 +1026,7 @@ class ShortcutNavEnv(gym.Env):
             self.col_walls, self.col_wall_refs = walls + goal_walls, wall_refs + goal_wall_refs
             self.boxes.append(goal)
 
-            # if self.goal_visible:
-            #     self.vis_walls, self.vis_wall_refs = walls + goal_walls, wall_refs + goal_wall_refs
-            #     self.col_walls, self.col_wall_refs = walls + goal_walls, wall_refs + goal_wall_refs
-            # else:
-            #     self.vis_walls, self.vis_wall_refs = walls, wall_refs
-            #     self.col_walls, self.col_wall_refs = walls + goal_walls, wall_refs + goal_wall_refs
-            # self.boxes.append(goal)
+        # We are using the task_structure 2 of fixed goal position from MWM env
         elif self.task_structure == 2 or self.task_structure == 5:
             if self.goal_corner == None:
                 corner = np.array([262.5, 262.5])
@@ -1037,7 +1035,15 @@ class ShortcutNavEnv(gym.Env):
             goal = Box(corner, goal_size, color=0, is_goal=True)            
             goal_walls, goal_wall_refs = self.get_walls([goal])
             self.vis_walls, self.vis_wall_refs = walls, wall_refs
-                        
+            
+            if self.universal_step < self.plum_steps:
+                # add a plum where goal is
+                plum = Box(corner, goal_size, color=color_to_idx['blue'])
+                plum_walls, plum_wall_refs = self.get_walls([plum])
+                self.vis_walls += plum_walls
+                self.vis_wall_refs += plum_wall_refs
+                self.boxes.append(plum)
+            
             if self.task_structure == 2:
                 # For usual invisible fixed platform task, make the platform collidable
                 self.col_walls, self.col_wall_refs = walls + goal_walls, wall_refs + goal_wall_refs
@@ -1288,4 +1294,7 @@ class ShortcutNavEnv(gym.Env):
 
     def seed(self, seed=0):
         np.random.seed(seed)
+        
+    def set_universal_step(self, universal_step):
+        self.universal_step = universal_step
 

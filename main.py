@@ -229,6 +229,11 @@ def main():
         args.num_env_steps) // args.num_steps // args.num_processes
     for j in range(start_update_step, num_updates):
         
+        # This parameter gives a way to control environment settings as
+        #  a function of time steps trained.
+        # To implement, simply add a def set_universal_step(self, global_step)
+        #  function to the env, have it save it to a self.global_step variable
+        #  and respond to the global step in some way
         if args.use_universal_step['on']:
             schedule = np.array(args.use_universal_step['schedule'])
             b = np.argwhere(global_step >= schedule).reshape(-1)
