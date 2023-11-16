@@ -253,7 +253,12 @@ def main():
                 if idx > universal_step_reset_point:
                     print(idx, step_args[idx])
                     universal_step_reset_point = idx
-                    envs.env_method('set_universal_arg', **step_args[idx])
+                    
+                    if type(step_args[idx]) == dict:
+                        envs.env_method('set_universal_arg', **step_args[idx])
+                    else:
+                        envs.env_method('set_universal_arg', step_args[idx])
+                        
             else:
                 # Method 2: just pass global_step and let env_kwargs handle it
                 b = np.argwhere(global_step >= schedule).reshape(-1)
