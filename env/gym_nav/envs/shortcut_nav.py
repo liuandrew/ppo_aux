@@ -1185,7 +1185,6 @@ class ShortcutNavEnv(gym.Env):
         
     def generate_plum(self):
         # generate plum and return the corner of it
-        print('generate plum: plum_pos ', str(self.plum_pos))
         idx = np.random.choice(range(len(self.plum_grid)))
         corner = self.plum_grid[idx]
         return corner
