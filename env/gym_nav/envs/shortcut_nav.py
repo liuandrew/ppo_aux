@@ -5,7 +5,7 @@ import math
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import io
-
+import itertools
 
 '''
 This is the environment currently used for continuous MWM task
@@ -420,7 +420,7 @@ class ShortcutNavEnv(gym.Env):
                 separate_aux_tasks=False, poster_thickness=None,
                 render_character=True, wall_thickness=None,
                 one_hot_obs=True, shortcut_probability=0.2,
-                wall_colors=4, shortcut_config=1, plum_steps=0):
+                wall_colors=4, shortcut_config=1, plum_pos=-1,):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
@@ -538,8 +538,7 @@ class ShortcutNavEnv(gym.Env):
         self.wall_colors = wall_colors
         self.shortcut_config = shortcut_config
         self.shortcuts_available = [False]
-        self.plum_steps = plum_steps
-        self.universal_step = 0
+        self.plum_pos = plum_pos
         
         observation_width = num_rays
         self.ray_obs_width = num_rays
@@ -585,7 +584,7 @@ class ShortcutNavEnv(gym.Env):
         self.vis_wall_refs = []
         self.col_walls = []
         self.col_wall_refs = []
-
+        self.plums = {}
         self.visited_sections = np.zeros((num_grid_slices, num_grid_slices,))
 
 
@@ -684,11 +683,6 @@ class ShortcutNavEnv(gym.Env):
                 reward += punish
                 info['bonus_reward'] = punish
             
-            
-            
-            
-
-            
         if collision_obj != None:
             if collision_obj.is_goal:
                 if self.verbose:
@@ -703,6 +697,25 @@ class ShortcutNavEnv(gym.Env):
                     #Note that character position is reset for task_structure 3 when colliding with
                     #the platform even though episode is not reset
                     self.reset_character_position()
+            elif 'plum' in self.plums and self.plums['plum'] == collision_obj:
+                # plum found, generate new one
+                reward = float(0.1)
+                corner = self.generate_plum()
+                plum = Box(corner, [10., 10.], color=color_to_idx['blue'])
+                plum_walls, plum_wall_refs = self.get_walls([plum])
+                vis_idx = self.plums['vis_idx']
+                col_idx = self.plums['col_idx']
+                for i in range(4):
+                    self.vis_walls[vis_idx+i] = plum_walls[i]
+                    self.vis_wall_refs[vis_idx+i] = plum
+                    self.col_walls[col_idx+i] = plum_walls[i]
+                    self.col_wall_refs[col_idx+i] = plum
+                self.plums['plum'] = plum
+                
+                self.character.update_walls(self.vis_walls, self.vis_wall_refs,
+                                            self.col_walls, self.col_wall_refs)
+                self.character.update_rays()
+
             else:
 #                 reward = -10
                 reward = float(self.collission_penalty)
@@ -795,6 +808,8 @@ class ShortcutNavEnv(gym.Env):
         
         for box in self.boxes:
             box.draw(ax=ax)
+        if 'plum' in self.plums:
+            self.plums['plum'].draw(ax=ax)
         if self.task_structure == 4:
             x_grid = int(np.floor(self.target_grid / self.num_grid_slices))
             y_grid = self.target_grid % self.num_grid_slices
@@ -1015,7 +1030,7 @@ class ShortcutNavEnv(gym.Env):
                 else:
                     make_shortwall.append(True)
         self.boxes, walls, wall_refs = self.make_walls(thickness=wall_thickness, with_shortwall=make_shortwall)
-                
+        
             
         if self.task_structure == 1:
             #generate a visible goal with random position
@@ -1035,14 +1050,6 @@ class ShortcutNavEnv(gym.Env):
             goal = Box(corner, goal_size, color=0, is_goal=True)            
             goal_walls, goal_wall_refs = self.get_walls([goal])
             self.vis_walls, self.vis_wall_refs = walls, wall_refs
-            
-            if self.universal_step < self.plum_steps:
-                # add a plum where goal is
-                plum = Box(corner, goal_size, color=color_to_idx['blue'])
-                plum_walls, plum_wall_refs = self.get_walls([plum])
-                self.vis_walls += plum_walls
-                self.vis_wall_refs += plum_wall_refs
-                self.boxes.append(plum)
             
             if self.task_structure == 2:
                 # For usual invisible fixed platform task, make the platform collidable
@@ -1074,7 +1081,22 @@ class ShortcutNavEnv(gym.Env):
         max_x = max(WINDOW_SIZE[0]-goal_center[0], goal_center[0])
         max_y = max(WINDOW_SIZE[1]-goal_center[1], goal_center[1])
         self.max_goal_dist = dist([max_x, max_y])
-            
+
+        self.generate_valid_plum_grid()
+        if self.plum_pos > -1:
+            # add a plum where goal is
+            corner = self.generate_plum()
+            plum = Box(corner, [10., 10.], color=color_to_idx['blue'])
+            plum_walls, plum_wall_refs = self.get_walls([plum])
+            vis_idx = len(self.vis_walls)
+            col_idx = len(self.col_walls)
+            self.vis_walls += plum_walls
+            self.vis_wall_refs += plum_wall_refs
+            self.col_walls += plum_walls
+            self.col_wall_refs += plum_wall_refs
+            self.plums['plum'] = plum
+            self.plums['vis_idx'] = vis_idx
+            self.plums['col_idx'] = col_idx
 
         if self.character_reset_pos == 0:
             pos_x = np.random.uniform(125, 175)
@@ -1128,19 +1150,6 @@ class ShortcutNavEnv(gym.Env):
         
         pos = self.fixed_reset[0]
         angle = self.fixed_reset[1]
-        # if pos is None:
-        #     while searching:
-        #         # Old position randomizer - too much space away from goal
-        #         if self.character_reset_pos == 0:
-        #             pos = np.random.uniform(low=30, high=270, size=(2,))
-        #             if dist(goal_center - pos) > 50:
-        #                 searching = False
-        #         elif self.character_reset_pos == 1:
-        #             pos = np.random.uniform(low=wall_thickness+3, high=300-wall_thickness-3, size=(2,))
-        #             if dist(goal_center - pos) > max(goal_size)*1.5:
-        #                 searching = False
-        # else:
-        #     pos = pos.copy()
 
                     
         if angle == None:
@@ -1151,7 +1160,35 @@ class ShortcutNavEnv(gym.Env):
         self.character.update_walls(self.vis_walls, self.vis_wall_refs,
                                     self.col_walls, self.col_wall_refs)
         self.character.update_rays()
-
+        
+        
+    def generate_valid_plum_grid(self):
+        if self.plum_pos == 0:
+            xgrid = np.linspace(5, 285, 140)
+            grid = np.vstack(list(itertools.product(xgrid, xgrid)))
+            grid = grid[~(( grid[:, 1] > 235 ) & (grid[:, 1] < 255))]
+            self.plum_grid = grid
+        elif self.plum_pos == 1:
+            xgrid = np.linspace(5, 285, 140)
+            grid = np.vstack(list(itertools.product(xgrid, xgrid)))
+            grid = grid[~(( grid[:, 1] > 235 ) & (grid[:, 1] < 255))]
+            grid = grid[~(( grid[:, 1] < 150 ))]
+            self.plum_grid = grid
+        elif self.plum_pos == 2:
+            xgrid = np.linspace(5, 285, 140)
+            grid = np.vstack(list(itertools.product(xgrid, xgrid)))
+            grid = grid[~((grid[:, 1] < 255))]
+            self.plum_grid = grid
+        elif self.plum_pos == 3:
+            self.plum_grid = np.array([[260., 260.]])
+        
+        
+    def generate_plum(self):
+        # generate plum and return the corner of it
+        print('generate plum: plum_pos ', str(self.plum_pos))
+        idx = np.random.choice(range(len(self.plum_grid)))
+        corner = self.plum_grid[idx]
+        return corner
 
     def make_walls(self, thickness=1, with_shortwall=[True]):
         boxes = []
@@ -1298,3 +1335,5 @@ class ShortcutNavEnv(gym.Env):
     def set_universal_step(self, universal_step):
         self.universal_step = universal_step
 
+    def set_universal_arg(self, plum_pos):
+        self.plum_pos = plum_pos

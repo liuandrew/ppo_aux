@@ -236,17 +236,35 @@ def main():
         #  and respond to the global step in some way
         # The paramemter added should be a dictionary containing 'on': True,
         #  'schedule': list of steps to send update to environment on
+        # 
         if args.use_universal_step['on']:
             schedule = np.array(args.use_universal_step['schedule'])
-            b = np.argwhere(global_step >= schedule).reshape(-1)
-            if len(b) == 0:
-                idx = 0
+            
+            if 'step_args' in args.use_universal_step:
+                # Method 1: pass arguments on the update that are defined in
+                #  'args' of use_universal_step parameter, send to set_universal_arg
+                #  These will be dictionary kw args
+                step_args = args.use_universal_step['step_args']
+                b = np.argwhere(global_step >= schedule).reshape(-1)
+                if len(b) == 0:
+                    idx = 0
+                else:
+                    idx = b[-1]
+                if idx > universal_step_reset_point:
+                    print(idx, step_args[idx])
+                    universal_step_reset_point = idx
+                    envs.env_method('set_universal_arg', **step_args[idx])
             else:
-                idx = b[-1]
-            if idx > universal_step_reset_point:
-                # perform reset 
-                universal_step_reset_point = idx
-                envs.env_method('set_universal_step', global_step)            
+                # Method 2: just pass global_step and let env_kwargs handle it
+                b = np.argwhere(global_step >= schedule).reshape(-1)
+                if len(b) == 0:
+                    idx = 0
+                else:
+                    idx = b[-1]
+                if idx > universal_step_reset_point:
+                    # perform reset 
+                    universal_step_reset_point = idx
+                    envs.env_method('set_universal_step', global_step)
 
 
         if args.use_linear_lr_decay:

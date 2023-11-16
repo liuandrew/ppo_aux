@@ -514,6 +514,36 @@ def shortcut_visdata_callback(agent, env, rnn_hxs, obs, action, reward, done, da
     return data
 
 
+def nav_data_callback(agent, env, rnn_hxs, obs, action, reward, done, data, stack=False,
+                      first=False):
+    '''
+    Check whether shortcut is used and also keep track of when shortcut enters vision
+    '''
+    if 'pos' not in data:
+        data['pos'] = []
+    if 'angle' not in data:
+        data['angle'] = []
+    if 'ep_pos' not in data:
+        data['ep_pos'] = []
+    if 'ep_angle' not in data:
+        data['ep_angle'] = []
+
+    if stack:
+        data['pos'].append(np.vstack(data['ep_pos']))
+        data['angle'].append(np.vstack(data['ep_angle']))
+        
+        data['ep_pos'] = []
+        data['ep_angle'] = []        
+    elif not done[0]:
+        pos = env.get_attr('character')[0].pos.copy()
+        angle = env.get_attr('character')[0].angle
+        data['ep_pos'].append(pos)
+        data['ep_angle'].append(angle)
+    
+    return data
+
+
+
 
 def check_shortcut_vision(pos, angle, fov=1, num_rays=12):
     '''Check if any vision lines would be intersecting with shortcut
