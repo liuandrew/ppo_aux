@@ -1163,24 +1163,24 @@ class ShortcutNavEnv(gym.Env):
         
         
     def generate_valid_plum_grid(self):
-        if self.plum_pos == 0:
+        if self.plum_pos == 0: # plum can be almost anywhere
             xgrid = np.linspace(5, 285, 140)
             grid = np.vstack(list(itertools.product(xgrid, xgrid)))
             grid = grid[~(( grid[:, 1] > 235 ) & (grid[:, 1] < 255))]
             self.plum_grid = grid
-        elif self.plum_pos == 1:
+        elif self.plum_pos == 1: # plum is in top half
             xgrid = np.linspace(5, 285, 140)
             grid = np.vstack(list(itertools.product(xgrid, xgrid)))
             grid = grid[~(( grid[:, 1] > 235 ) & (grid[:, 1] < 255))]
             grid = grid[~(( grid[:, 1] < 150 ))]
             self.plum_grid = grid
-        elif self.plum_pos == 2:
+        elif self.plum_pos == 2: # plum is in corridor
             xgrid = np.linspace(5, 285, 140)
             grid = np.vstack(list(itertools.product(xgrid, xgrid)))
             grid = grid[~((grid[:, 1] < 255))]
             self.plum_grid = grid
-        elif self.plum_pos == 3:
-            self.plum_grid = np.array([[260., 260.]])
+        elif self.plum_pos == 3: # plum is on platform
+            self.plum_grid = np.array([[270., 270.]])
         
         
     def generate_plum(self):
