@@ -20,7 +20,7 @@ from ppo.algo.ppo import PPOAux
 from ppo.algo import gail
 from ppo.arguments import get_args
 from ppo.envs import make_vec_envs
-from ppo.model import Policy
+from ppo.model import Policy, norm_scale_parameters
 from ppo.storage import RolloutStorage, RolloutStorageAux
 from evaluation import evaluate
 
@@ -150,6 +150,8 @@ def main():
                 freeze_layers = clone_args['freeze_layers'].split(',')
             else:
                 freeze_layers = []
+                
+            
             
             for name in clone_layers:
                 copy_params = list(getattr(clone_actor_critic.base, name).parameters())
@@ -157,6 +159,9 @@ def main():
                 print(f'Cloning layer {name}')
                 for i in range(len(copy_params)):
                     paste_params[i].data.copy_(copy_params[i].data)
+                    
+            if 'norm_layers' in clone_args and clone_args['norm_layers']:
+                norm_scale_parameters(actor_critic.base, clone_layers)
                     
             for name in freeze_layers:
                 print(f'Freezing layer {name}')                

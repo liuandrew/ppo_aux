@@ -1142,3 +1142,29 @@ class DelayedRNNPPO(NNBase):
                 'critic_activations': critic_activations
             }        
         return outputs
+    
+    
+def norm_scale_parameters(model, names=[]):
+    '''Rescale layers of a model to be as if they were normally initiated'''
+    
+    for name in names:
+        reduce_params = []
+        for param in list(model.named_parameters()):
+            if name in param[0]:
+                reduce_params.append(param)    
+        for param in reduce_params:
+            if 'weight' in param[0]:
+                mean = param[1].abs().mean().item()
+                p_clone = param[1].clone()
+
+                if name == 'gru':
+                    nn.init.orthogonal_(p_clone)
+                else:
+                    nn.init.orthogonal_(p_clone, np.sqrt(2))
+                target_mean = p_clone.abs().mean().item()
+                scale = target_mean / mean
+                print(scale)
+                param[1].data.copy_(param[1] * scale)
+            elif 'bias' in param[0]:
+                nn.init.constant_(param[1], 0)
+        

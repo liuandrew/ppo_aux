@@ -205,6 +205,7 @@ def get_args():
         'freeze_layers': ['gru', 'shared0'], #named layers to freeze,
         'copy_obs_rms': True #whether to copy obs_rms to envs,
         'freeze_obs_rms': True #whether to freeze obs_rms
+        'norm_layers': True #whether to scale down weight sizes to be close to standard initial mean
     }
     '''
 

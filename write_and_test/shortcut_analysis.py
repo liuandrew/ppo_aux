@@ -807,9 +807,12 @@ def compute_path_steps(pos, angle, target, ret_pos=False, perfect_angle=False,
     return total_steps
 
 
-def check_shortcut_usage(p, ret_arrays=False):
+def check_shortcut_usage(p, ret_arrays=False, req_finish=True):
     '''
     Check if shortcut was used in a trajectory
+    
+    req_finish: if True, only count episodes where the goal was reached (assume this is true if
+      len(p) < 202)
     '''
     # Check that x values are within range
     x1 = (p[:-1, 0] > 125) & (p[:-1, 0] < 175)
@@ -819,8 +822,11 @@ def check_shortcut_usage(p, ret_arrays=False):
     y1 = (p[:-1, 1] < 250)
     y2 = (p[1:, 1] > 250)
 
-    # Crossed shortcut
-    used_shortcut = ((y1 & y2) & (x1 | x2)).any()
+    used_shortcut = ((y1 & y2) & (x1 | x2)).any() 
+    
+    if req_finish:
+        fin = len(p) < 202
+        used_shortcut = used_shortcut & fin
     
     if ret_arrays:
         return used_shortcut, [x1, x2, y1, y2]
