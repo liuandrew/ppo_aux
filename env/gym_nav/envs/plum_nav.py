@@ -436,7 +436,7 @@ class PlumNavEnv(gym.Env):
                 separate_aux_tasks=False, poster_thickness=None,
                 render_character=True, wall_thickness=None,
                 one_hot_obs=True, num_plums=2,
-                wall_colors=1):
+                wall_colors=1, shortcut_probability=0.):
         '''
         rew_structure: 'dist' - reward given based on distance to goal
                         'goal' - reward only given when goal reached
@@ -552,6 +552,7 @@ class PlumNavEnv(gym.Env):
         self.wall_colors = wall_colors
         self.num_plums = num_plums
         self.plum_grid_generated = False
+        self.shortcut_probability = shortcut_probability
         
         observation_width = num_rays
         self.ray_obs_width = num_rays
@@ -959,6 +960,7 @@ class PlumNavEnv(gym.Env):
         else:
             wall_thickness = self.wall_thickness
         
+        # Same white outer walls used in all tasks
         boxes, walls, wall_refs = self.make_outer_walls(thickness=wall_thickness)
         for i in range(4):
             key = f'outer{i}'
@@ -985,7 +987,7 @@ class PlumNavEnv(gym.Env):
                 box = Box(corner, np.array([75., 75.]), color=color_to_idx[colors[i]])
                 self.add_box_to_walls(box, key)
                             
-        # Generate random slanted walls
+        # Generate 'random' slanted walls
         if self.task_structure == 2 or self.task_structure == 2.5:
             corners = [
                 np.array([40., 80.]), #\
@@ -1035,6 +1037,36 @@ class PlumNavEnv(gym.Env):
                 box = Box(corner, np.array([width, height]), angle=angle, color=color)
                 self.add_box_to_walls(box, key)
                 
+        # generate standard shortcut nav environment with 1.5 wall color setting
+        #  i.e., white outer and corridor walls, purple shortcut wall
+        if self.task_structure == 3:
+            thickness = 1
+            self.boxes['corridor1'] = Box(np.array([50, 250]), np.array([75, thickness]), color=color_to_idx['white'])
+            self.boxes['corridor2'] = Box(np.array([175, 250]), np.array([125, thickness]), color=color_to_idx['white'])
+
+            self.vis_walls['corridor1'] = [[175, 250], [300, 250]]
+            self.vis_walls['corridor2'] = [[50, 250], [125, 250]]
+            self.vis_wall_refs['corridor1'] = self.boxes['corridor1']
+            self.vis_wall_refs['corridor2'] = self.boxes['corridor2']
+
+            self.col_walls['corridor1'] = [[175, 250], [300, 250]]
+            self.col_walls['corridor2'] = [[50, 250], [125, 250]]
+            self.col_wall_refs['corridor1'] = self.boxes['corridor1']
+            self.col_wall_refs['corridor2'] = self.boxes['corridor2']
+            
+            if np.random.random() < self.shortcut_probability:
+                del self.boxes['shortwall']
+                del self.vis_walls['shortwall']
+                del self.vis_wall_refs['shortwall']
+                del self.col_walls['shortwall']
+                del self.col_wall_refs['shortwall']
+            else:
+                self.boxes['shortwall'] = Box(np.array([125, 250]), np.array([50, thickness]), color=color_to_idx['purple'])
+                self.vis_walls['shortwall'] = [[125, 250], [175, 250]]
+                self.vis_wall_refs['shortwall'] = self.boxes['shortwall']
+                self.col_walls['shortwall'] = [[125, 250], [175, 250]]
+                self.col_wall_refs['shortwall'] = self.boxes['shortwall']
+                
         # generate the plum grid after walls are made
         if not self.plum_grid_generated:
             self.generate_valid_plum_grid()
@@ -1074,6 +1106,12 @@ class PlumNavEnv(gym.Env):
         elif self.task_structure == 2 or self.task_structure == 2.5:
             self.plum_grid = self.find_valid_plum_grid()
         
+        elif self.task_structure == 3:
+            xgrid = np.linspace(5, 285, 140)
+            grid = np.vstack(list(itertools.product(xgrid, xgrid)))
+            grid = grid[~(( grid[:, 1] > 235 ) & (grid[:, 1] < 255))]
+            self.plum_grid = grid
+
         
     def find_valid_plum_grid(self):
         # Find valid plum points by generating a grid and looking for intersections with walls
