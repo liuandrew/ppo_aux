@@ -10,6 +10,54 @@ File for helping with some plotting functions
 '''
 
 
+def set_rc():
+    '''Set rc params to be ready for paper polished plots'''
+    pplt.rc.reset()
+    pplt.rc.update({
+        'font.size': 10,
+        'font.family': 'Arial',
+        'hatch.linewidth': 1,
+        'pdf.fonttype': 42 # Used to embed fonts into pdf
+    })
+    
+    
+def add_abc_to_subaxes(ax, text='A.', left=0, top=1.05):
+    '''
+    Add ABC type labels to specific subaxes similar to those
+    from proplot
+    
+    Note that if creating a single ax as in fig, ax = pplt.subplots()
+    the ax to pass in is add_abc_to_subaxes(ax[0]) since it works
+    with subaxes specifically
+    '''
+    abc_kw = pplt.rc.fill(
+        {
+            'size': 'abc.size',
+            'weight': 'abc.weight',
+            'color': 'abc.color',
+            'family': 'font.family',
+        },
+        context=True
+    )
+    border_kw = pplt.rc.fill(
+        {
+            'border': 'abc.border',
+            'borderwidth': 'abc.borderwidth',
+            'bbox': 'abc.bbox',
+            'bboxpad': 'abc.bboxpad',
+            'bboxcolor': 'abc.bboxcolor',
+            'bboxstyle': 'abc.bboxstyle',
+            'bboxalpha': 'abc.bboxalpha',
+        },
+        context=True,
+    )
+    kw = {'zorder': 3.5, 'transform': ax.transAxes}
+    
+    ax.text(left, top, text, **abc_kw, **border_kw, **kw)
+    
+    
+
+
 # Colors to assign to auxiliary tasks (they will be assigned in order)
 colors = pplt.Cycle('default').by_key()['color']
 hex_to_rgb = lambda h: tuple(int(h.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))

@@ -973,13 +973,17 @@ class PlumNavEnv(gym.Env):
             
         
         # Generate 4 boxes
-        if self.task_structure == 1 or self.task_structure == 1.5:
+        if self.task_structure in [1, 1.5, 1.7, 1.8]:
             corners = [np.array([50., 175.]),
                     np.array([175., 175.]),
                     np.array([50., 50.]),
                     np.array([175., 50.])]
-            colors = ['red', 'green', 'yellow', 'purple']
-            if self.task_structure == 1.5:
+            if self.task_structure in [1, 1.5]:
+                colors = ['red', 'green', 'yellow', 'purple']
+            elif self.task_structure in [1.7, 1.8]:
+                colors = ['white', 'white', 'white', 'purple']
+            
+            if self.task_structure in [1.5, 1.8]:
                 colors = np.random.permutation(colors)
             
             for i, corner in enumerate(corners):
@@ -988,7 +992,7 @@ class PlumNavEnv(gym.Env):
                 self.add_box_to_walls(box, key)
                             
         # Generate 'random' slanted walls
-        if self.task_structure == 2 or self.task_structure == 2.5:
+        if self.task_structure in [2, 2.5, 2.7, 2.8]:
             corners = [
                 np.array([40., 80.]), #\
                 np.array([175., 120.]), #^
@@ -1022,9 +1026,13 @@ class PlumNavEnv(gym.Env):
                 160., 
                 75.,
             ]
-            colors = ['purple', 'red', 'green', 'yellow', 'white', 'purple']
             color_nums = np.cumsum([1, 2, 2, 1, 2, 1])
-            if self.task_structure == 2.5:
+            
+            if self.task_structure in [2, 2.5]:
+                colors = ['purple', 'red', 'green', 'yellow', 'white', 'purple']
+            elif self.task_structure in [2.7, 2.8]:
+                colors = ['purple', 'white', 'white', 'purple', 'white', 'white']
+            if self.task_structure in [2.5, 2.8]:
                 colors = np.random.permutation(colors)
             for i in range(len(corners)):
                 corner = corners[i]
@@ -1091,7 +1099,7 @@ class PlumNavEnv(gym.Env):
     def generate_valid_plum_grid(self):
         # Based on task structure, find where apples can be generated from
         
-        if self.task_structure == 1 or self.task_structure == 1.5:
+        if self.task_structure in [1, 1.5, 1.7, 1.8]:
             xgrid = np.linspace(5, 285, 140)
             grid = np.vstack(list(itertools.product(xgrid, xgrid)))
             corners = [np.array([50., 175.]),
@@ -1103,7 +1111,7 @@ class PlumNavEnv(gym.Env):
                             (grid[:, 1] > corner[1]-5) & (grid[:, 1] < corner[1]+80) )]
             self.plum_grid = grid
             
-        elif self.task_structure == 2 or self.task_structure == 2.5:
+        elif self.task_structure in [2, 2.5, 2.7, 2.8]:
             self.plum_grid = self.find_valid_plum_grid()
         
         elif self.task_structure == 3:

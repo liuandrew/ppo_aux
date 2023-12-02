@@ -126,6 +126,7 @@ def main():
             print('Loading', args.cont_file_name)
             actor_critic, obs_rms = torch.load(args.cont_file_name)
         else:
+            print('Loading', save_path)
             actor_critic, obs_rms = torch.load(save_path)
     
     if not loaded_model:

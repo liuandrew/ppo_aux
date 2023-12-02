@@ -836,12 +836,88 @@ def check_shortcut_usage(p, ret_arrays=False, req_finish=True):
 
 
 
+
 '''
 ================================================================
 Evaluation helper functions
 ================================================================
 Some functions that help perform evaluations, although we end up not using these very often
+
+Main function: 
+shortcut_test: 50 episodes of shortcut open and 50 closed. Can used fixed trajectory or policy
+
 '''
+
+
+
+def shortcut_test(exp_name=None, trial=0, chk=0, plum_pos=-1, with_fa=False,
+                  model=None, obs_rms=None):
+    
+    fa = pickle.load(open('data/shortcut/forced_actions_v2', 'rb'))
+    if model is None:
+        if exp_name is None:
+            raise Exception('need exp_name or model/obs_rms')
+        model, obs_rms = load_chk(exp_name, trial=trial, chk=chk, subdir='')
+    
+    num_episodes=50
+    all_res = {
+        'ws': [],
+        'ns': []
+    }
+    if with_fa:
+        forced_actions = fa['ns']
+    else:
+        forced_actions = None
+    res = forced_action_evaluate(model, obs_rms, env_name='ShortcutNav-v0', 
+                           env_kwargs={'character_reset_pos': 3,
+                                      'shortcut_probability': 0,
+                                      'wall_colors': 1.5,
+                                      'plum_pos': plum_pos},
+                       seed=1, with_activations=True, data_callback=shortcut_visdata_callback,
+                           num_episodes=num_episodes, forced_actions=forced_actions)
+
+    '''Collect up to first+nth step of seeing shortcut
+    where first is the first step seeing the shortcut'''
+    activs = ep_stack_activations(res, half=True)
+
+    all_res['ns'].append({
+        'activs': activs,
+        'actions': res['actions'],
+        'ep_pos': res['data']['pos'],
+        'ep_angle': res['data']['angle'],
+        'vis': res['data']['shortcut_vis'],
+        'shortcut': res['data']['shortcut']
+    })
+    if with_fa:
+        forced_actions = fa['ws']
+    else:
+        forced_actions = None
+
+    res = forced_action_evaluate(model, obs_rms, env_name='ShortcutNav-v0', 
+                   env_kwargs={'character_reset_pos': 3,
+                              'shortcut_probability': 1,
+                              'wall_colors': 1.5,
+                              'plum_pos': plum_pos},
+               seed=1, with_activations=True, data_callback=shortcut_visdata_callback,
+                   num_episodes=num_episodes, forced_actions=forced_actions)
+
+    '''Collect up to first+nth step of seeing shortcut
+    where first is the first step seeing the shortcut'''
+    activs = ep_stack_activations(res, half=True)
+
+    all_res['ws'].append({
+        'activs': activs,
+        'actions': res['actions'],
+        'ep_pos': res['data']['pos'],
+        'ep_angle': res['data']['angle'],
+        'vis': res['data']['shortcut_vis'],
+        'shortcut': res['data']['shortcut']
+    })
+        
+    return all_res
+
+
+
 
 def test_shortcut_use_rate(model, obs_rms, character_reset_pos=3, n_eps=100, env_kwargs={}):
     kw = {'character_reset_pos': character_reset_pos, 'shortcut_probability': 1.}
