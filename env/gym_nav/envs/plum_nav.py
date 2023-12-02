@@ -568,19 +568,6 @@ class PlumNavEnv(gym.Env):
             observation_width += 1
         if give_time:
             observation_width += 1
-        #For ongoing episode resetting position when goal reached,
-        #agent needs to be told when platform is actually reached
-        if task_structure == 3:
-            observation_width += 1
-            
-        # task structure 4 tells the agent on which grid the goal is
-        if task_structure == 4:
-            num_grid = self.num_grid_slices ** 2
-            observation_width += num_grid + 1
-        
-        #Add action for task_structure 5 that allows the agent to end the episode
-        if task_structure == 5:
-            self.num_actions = self.num_actions + 1
 
         self.observation_space = spaces.Box(low=0, high=1, shape=(observation_width,))
         self.action_space = spaces.Discrete(self.num_actions) #turn left, forward, right as actions
@@ -740,8 +727,6 @@ class PlumNavEnv(gym.Env):
             self.character.pos = start_point.copy()
         if start_angle is not None:
             self.character.angle = start_angle
-        if self.task_structure == 4:
-            self.change_target_grid()
         
         self.character.update_rays()
         observation = self.get_observation()
@@ -768,19 +753,7 @@ class PlumNavEnv(gym.Env):
         
         for box in self.boxes.values():
             box.draw(ax=ax)
-        if self.task_structure == 4:
-            x_grid = int(np.floor(self.target_grid / self.num_grid_slices))
-            y_grid = self.target_grid % self.num_grid_slices
-            x_low = x_grid * WINDOW_SIZE[0] / self.num_grid_slices
-            y_low = y_grid * WINDOW_SIZE[1] / self.num_grid_slices
-            x_size = WINDOW_SIZE[0] / self.num_grid_slices
-            y_size = WINDOW_SIZE[1] / self.num_grid_slices
-            corner = np.array([x_low, y_low])
-            size = np.array([x_size, y_size])
-            grid_box = Box(corner, size, color=6, is_goal=True)
-            grid_box.draw(ax=ax)
-        
-        #trim borders
+
         # image_from_plot = image_from_plot[52:380,52:390,:]
         
         # with io.BytesIO() as buff:
@@ -833,15 +806,6 @@ class PlumNavEnv(gym.Env):
             obs = self.character.ray_obs()
             if not self.give_dist:
                 obs = obs[:self.num_rays]
-            if self.task_structure == 3:
-                obs = np.append(obs, [0.])
-            if self.task_structure == 4:
-                # Need to create one-hot encoding for grid target
-                num_grid = self.num_grid_slices ** 2
-                obs_add = np.zeros(num_grid + 1)
-                obs_add[self.target_grid] = 1
-                obs_add[num_grid] = self.last_reward
-                obs = np.append(obs, obs_add)
 
             return obs
         
@@ -972,7 +936,7 @@ class PlumNavEnv(gym.Env):
             
             
         
-        # Generate 4 boxes
+        # Generate 4 boxescd 
         if self.task_structure in [1, 1.5, 1.7, 1.8]:
             corners = [np.array([50., 175.]),
                     np.array([175., 175.]),
