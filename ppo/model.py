@@ -1034,54 +1034,39 @@ class DelayedRNNPPO(NNBase):
         self.auxiliary_output_idxs = [] # indexes for generating auxiliary outputs
         self.auxiliary_layer_types = [] # 0 linear, 1 distribution
         self.auxiliary_output_sizes = []
-        # generate auxiliary outputs
+        # generate auxiliary outputs - assume that all heads are attached at the final actor layer
         current_auxiliary_output_idx = 0
-        # for i, head in enumerate(auxiliary_heads):
-        #     depth = head[0]
-        #     if depth == -1:
-        #         depth = self.num_layers
-        #     side = head[1]
-        #     output_type = head[2]
-        #     output_size = head[3]
-        #     self.auxiliary_output_idxs.append(current_auxiliary_output_idx)
-        #     if depth == 0:
-        #         raise Exception('Auxiliary task requesting depth of 0')
-        #     if depth > self.num_layers:
-        #         raise Exception('Auxiliary task requesting depth greater than exists in network (head[0])')
-        #     if side > 1:
-        #         raise Exception('Auxiliary task requesting side that is not 0 (actor) or 1 (critic)')
-        #     total_shared_layers = num_shared_layers
-        #     if recurrent: 
-        #         total_shared_layers += 1
+        for i, head in enumerate(auxiliary_heads):
+            # depth = head[0]
+            # if depth == -1:
+            #     depth = self.num_layers
+            # side = head[1]
+            output_type = head[2]
+            output_size = head[3]
+            self.auxiliary_output_idxs.append(current_auxiliary_output_idx)
 
-        #     if side == -1:
-        #         if depth > total_shared_layers:
-        #             raise Exception('Auxiliary task expects to be on shared layers, but is assigned to layers past shared')
-        #     else:
-        #         if depth <= total_shared_layers:
-        #             raise Exception('Auxiliary task expects to be on individual layers, but is assigned to shared depth')
-            
-        #     if output_type == 0:
-        #         # linear output
-        #         layer = init_(nn.Linear(hidden_size, output_size))
-        #         self.auxiliary_output_sizes.append(output_size)
-        #         self.auxiliary_layer_types.append(0)
-        #     elif output_type == 1:
-        #         # output based on gym space
-        #         # code taken from Policy to implement a dist function
-        #         layer = Categorical(hidden_size, output_size)
-        #         self.auxiliary_output_sizes.append(output_size)
-        #         self.auxiliary_layer_types.append(1)
-        #     else:
-        #         raise NotImplementedError
+            if output_type == 0:
+                # linear output
+                layer = init_(nn.Linear(hidden_size, output_size))
+                self.auxiliary_output_sizes.append(output_size)
+                self.auxiliary_layer_types.append(0)
+            elif output_type == 1:
+                # output based on gym space
+                # code taken from Policy to implement a dist function
+                layer = Categorical(hidden_size, output_size)
+                self.auxiliary_output_sizes.append(output_size)
+                self.auxiliary_layer_types.append(1)
+            else:
+                raise NotImplementedError
                 
-        #     setattr(self, 'auxiliary'+str(i), layer)
-        #     self.auxiliary_layers.append(getattr(self, 'auxiliary'+str(i)))
+            setattr(self, 'auxiliary'+str(i), layer)
+            self.auxiliary_layers.append(getattr(self, 'auxiliary'+str(i)))
         
-        # if len(self.auxiliary_output_sizes) == 0:
-            # self.has_auxiliary = False
+        if len(self.auxiliary_output_sizes) == 0:
+            self.has_auxiliary = False
+        else:
+            self.has_auxiliary = True
             
-        self.has_auxiliary = False
         self.train()
         
         
@@ -1126,6 +1111,14 @@ class DelayedRNNPPO(NNBase):
                     
         # Finally get critic value estimation
         critic_val = self.critic_head(critic_x)
+
+        # Get auxliary outputs
+        if self.has_auxiliary:
+            for j, layer in enumerate(self.auxiliary_layers):
+                auxiliary_output = layer(actor_x)
+                if self.auxiliary_layer_types[j] == 1:
+                    auxiliary_output = auxiliary_output.probs
+                auxiliary_preds[j] = auxiliary_output
 
         outputs = {
             'value': critic_val,
