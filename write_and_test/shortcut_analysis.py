@@ -12,6 +12,10 @@ from scipy.spatial import distance
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 
+from pathlib import Path
+import pandas as pd
+import scipy
+
 turn_speed = 0.3
 move_speed = 10
 
@@ -235,26 +239,6 @@ def plot_two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None
     return ax, dist
 
 
-def linear_bestfit(x, y):
-    if type(x) == list:
-        x = np.array(x)
-    if type(y) == list:
-        y = np.array(y)
-    
-    if len(x.shape) == 1:
-        x = x.reshape(-1, 1)
-    
-    lr = LinearRegression().fit(x, y)
-    y_pred = lr.predict(x)
-    
-    x_min, x_max = x.min(), x.max()
-    r2 = r2_score(y, y_pred)
-    
-    xs = np.array([x_min, x_max]).reshape(-1, 1)
-    ys = lr.predict(xs)
-    
-    return xs, ys, r2
-
 
 
 def draw_shortcut_maze(shortcut_open=True, ax=None):
@@ -425,6 +409,141 @@ def comb_policy_res(shortcut_res, chk, vis_n=5, first_n_eps=50,
         res['activ'] = torch.vstack([activ1, activ2])
         
     return res
+
+'''
+================================================================
+Learning curve helper methods
+================================================================
+Methods for combining learning curve data from continued experiments
+and for finding the first points that performance crosses threshold
+to line up learning curves
+'''
+
+def combine_cont_df(exp_format='shortcut_wc1.5p{p}_t{t}',
+                    cont_format='shortcut_wc1.5p{p}_cont_t{t}',
+                    formatter={}, subdir='shortcut_wc2', concat=True):
+    '''
+    Combine a run dataframe with a continuation if it exists
+    Otherwise simply return the original df
+    '''
+    
+    runs = Path('../runs')/subdir
+    folder_names = [f.name for f in runs.iterdir()]
+    run_names = [f.name.split('__')[0] for f in runs.iterdir()]
+    
+    exp_name = exp_format.format(**formatter)
+    cont_name = cont_format.format(**formatter)
+
+    exp_idx = run_names.index(exp_name)
+    exp_file = runs/folder_names[exp_idx]/'tflog.csv'
+    df = pd.read_csv(exp_file)
+
+    if cont_name in run_names:
+        cont_idx = run_names.index(cont_name)
+        cont_file = runs/folder_names[cont_idx]/'tflog.csv'
+        df2 = pd.read_csv(cont_file)
+        if not concat:
+            return df, df2
+        df = pd.concat([df, df2], ignore_index=True)
+    return df
+        
+    
+def get_run_df_metric(df, metric='length', alpha=0.01, ignore_first=100):
+    '''
+    From a run df loaded with combine_cont_df or just pd.read_csv,
+    perform the usual average_runs method of getting out a vector
+    of x and y to plot or analyze
+    '''
+    shortcut_to_key = {
+        'value_loss': 'losses/value_loss',
+        'policy_loss': 'losses/policy_loss',
+        'aux_loss': 'losses/auxiliary_loss',
+        'return': 'charts/episodic_return',
+        'length': 'charts/episodic_length'
+    }
+    
+    if metric in shortcut_to_key:
+        metric = shortcut_to_key[metric]
+    
+    df = df[df['metric'] == metric]
+    ewm = df['value'].ewm(alpha=alpha).mean()
+    inter = scipy.interpolate.interp1d(df['step'], ewm)
+    min_x, max_x = df.iloc[0]['step'], df.iloc[-1]['step']
+    x = np.arange(min_x, max_x, 200)
+    y = inter(x)
+    
+    x = x[ignore_first:]
+    y = y[ignore_first:]
+    return x, y
+
+
+def get_first_shortcut_performance(t, lens, below_y=180, batch=64, ret_chk=True):
+    '''Find when the agent first shows "signs of life", as in average
+    escape time drops below below_y. We find that using an 
+    exponentially weighted running mean with alpha=0.01 and below_y=180
+    gives pretty consistent results
+    
+    
+    return:
+        ret_chk: the nearest multiple-of-10 checkpoint where this occurs
+        else: the actual first index
+    '''
+    first = np.argmax(lens < below_y)
+    if first == 0:
+        return False
+    
+    first_t = t[first]
+    first_chk = first_t / (batch*100)
+    first_chk = int(round(first_chk, -1)) #round to nearest 10
+    
+    if ret_chk:
+        return first_chk
+    else:
+        return first
+    
+    
+def get_first_last_performing_chks(exp_format='plumtosc_sharedn_plumsched1_task{task}p{p}_t{t}',
+                                   cont_format='plumtosc_sharedn_plumsched1_task{task}p{p}_cont_t{t}',
+                                   formatter={'p': 0.4, 'task': 1.7, 't': 0}, verbose=False, subdir='plumtosc',
+                                   follow_chk_sched=True):
+    '''Specific function for getting first and last checkpoints to test
+    starting from first performing
+    
+    If return False, it means either not enough chks available or 
+        never reached the required performance to start
+    '''    
+    # Get first checkpoint where performance is sufficient
+    df = combine_cont_df(exp_format=exp_format,
+                         cont_format=cont_format,
+                         formatter=formatter, subdir=subdir)
+    x, y = get_run_df_metric(df, ignore_first=1000)
+    first_chk = get_first_shortcut_performance(x, y)
+    
+    exp_name = exp_format.format(**formatter)
+    
+    folder = Path(f'../saved_checkpoints/{subdir}/{exp_name}')
+    fnames = [f.name for f in folder.iterdir()]
+    
+    # Get the last chk available in saved_checkpoints folder in chk_sched
+    chks = first_chk + chk_sched
+    last_chk_sched_idx = -1
+    for i, chk in enumerate(chks):
+        if f'{chk}.pt' not in fnames:
+            last_chk_sched_idx = i-1
+            break
+    
+    if verbose:
+        print(f'{p}_{t}', first_chk)
+    
+    if first_chk is False:
+        return False
+    else:
+        return first_chk, last_chk_sched_idx
+    
+
+
+
+
 
 '''
 ================================================================

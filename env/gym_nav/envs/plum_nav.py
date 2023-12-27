@@ -1012,7 +1012,7 @@ class PlumNavEnv(gym.Env):
         # generate standard shortcut nav environment with 1.5 wall color setting
         #  i.e., white outer and corridor walls, purple shortcut wall
         if self.task_structure == 3:
-            thickness = 1
+            thickness = self.wall_thickness
             self.boxes['corridor1'] = Box(np.array([50, 250]), np.array([75, thickness]), color=color_to_idx['white'])
             self.boxes['corridor2'] = Box(np.array([175, 250]), np.array([125, thickness]), color=color_to_idx['white'])
 

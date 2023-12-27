@@ -56,12 +56,38 @@ def add_abc_to_subaxes(ax, text='A.', left=0, top=1.05):
     ax.text(left, top, text, **abc_kw, **border_kw, **kw)
     
     
+def linear_bestfit(x, y):
+    '''
+    Given a set of x, y points, calculate linear line of best fit
+    return:
+        xs, ys: values to plot the line onto a plot with
+        r2: R2 score
+    '''
+    if type(x) == list:
+        x = np.array(x)
+    if type(y) == list:
+        y = np.array(y)
+    
+    if len(x.shape) == 1:
+        x = x.reshape(-1, 1)
+    
+    lr = LinearRegression().fit(x, y)
+    y_pred = lr.predict(x)
+    
+    x_min, x_max = x.min(), x.max()
+    r2 = r2_score(y, y_pred)
+    
+    xs = np.array([x_min, x_max]).reshape(-1, 1)
+    ys = lr.predict(xs)
+    
+    return xs, ys, r2
 
 
 # Colors to assign to auxiliary tasks (they will be assigned in order)
 colors = pplt.Cycle('default').by_key()['color']
 hex_to_rgb = lambda h: tuple(int(h.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
 rgb_colors = np.array([hex_to_rgb(color) for color in colors])/255
+rgb_colors = [list(color) for color in rgb_colors]
 
 def rgb_to_hex(rgb, scaleup=True):
     if scaleup:

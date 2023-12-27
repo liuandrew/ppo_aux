@@ -288,7 +288,7 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
              device=torch.device('cpu'), ret_info=1, capture_video=False, env_kwargs={}, data_callback=None,
              num_episodes=10, verbose=0, with_activations=False, deterministic=True,
              aux_wrapper_kwargs={}, auxiliary_truth_sizes=[],
-             eval_log_dir=None, video_folder='./video'):
+             eval_log_dir=None, video_folder='./video', with_aux=False):
     '''
     ret_info: level of info that should be tracked and returned
     capture_video: whether video should be captured for episodes
@@ -423,14 +423,15 @@ def forced_action_evaluate(actor_critic, obs_rms=None, normalize=True, forced_ac
                     obs, action, reward, done, data)
             else:
                 data = {}
-                
+            
             auxiliary_truths = [[] for i in range(len(actor_critic.auxiliary_output_sizes))]
-            for info in infos:
-                if 'auxiliary' in info and len(info['auxiliary']) > 0:
-                    for i, aux in enumerate(info['auxiliary']):
-                        auxiliary_truths[i].append(aux)
-            if len(auxiliary_truths) > 0:
-                auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
+            if with_aux:
+                for info in infos:
+                    if 'auxiliary' in info and len(info['auxiliary']) > 0:
+                        for i, aux in enumerate(info['auxiliary']):
+                            auxiliary_truths[i].append(aux)
+                if len(auxiliary_truths) > 0:
+                    auxiliary_truths = [torch.tensor(np.vstack(aux)) for aux in auxiliary_truths]
             ep_auxiliary_truths.append(auxiliary_truths)
             
             

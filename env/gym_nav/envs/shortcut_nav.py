@@ -535,6 +535,7 @@ class ShortcutNavEnv(gym.Env):
         self.poster_thickness = poster_thickness
         self.wall_thickness = wall_thickness
         self.shortcut_probability = shortcut_probability
+        self.aux_shortcut_seen = False # Note only works if auxiliary task 7 is on
         self.wall_colors = wall_colors
         self.shortcut_config = shortcut_config
         self.shortcuts_available = [False]
@@ -792,7 +793,7 @@ class ShortcutNavEnv(gym.Env):
         self.visited_sections = np.zeros((self.num_grid_slices, self.num_grid_slices,))
         self.visited_positions = np.full((self.max_steps + 50, 2), np.inf)
         self.visited_idx = 0
-
+        self.aux_shortcut_seen = False
         return observation
 
     
@@ -936,7 +937,7 @@ class ShortcutNavEnv(gym.Env):
                 #normalize distance to [0, 1]
                 goal_dist = goal_dist / MAX_LEN
                 output = [goal_dist]
-            #4-6 categorical auxiliary tasks
+            #4-7 categorical auxiliary tasks
             #4: currently faced wall - output label 0-3 for currently faced wall
             if task == 4:
                 #conversion of angle to be between 0 and 2pi, then check quadrant of angle faced
@@ -985,7 +986,23 @@ class ShortcutNavEnv(gym.Env):
                     quadrant += 1
                 if char_pos[1] > WINDOW_SIZE[1]/2:
                     quadrant += 2
-                output = [quadrant]                
+                output = [quadrant]
+            #7: shortcut available - output label 0-2 for whether shortcut is available
+            #  0: not seen yet, 1: seen and closed, 2: seen and open
+            if task == 7:
+                if not self.aux_shortcut_seen:
+                    in_view = check_shortcut_vision(self.character.pos, self.character.angle)
+                    if in_view:
+                        self.aux_shortcut_seen = True
+                    else:
+                        output = [0]
+                
+                if self.aux_shortcut_seen:
+                    if self.shortcuts_available[0]:
+                        output = [2]
+                    else:
+                        output = [1]
+                
             if self.separate_aux_tasks:
                 auxiliary_output.append(output)
             else:
@@ -1336,3 +1353,55 @@ class ShortcutNavEnv(gym.Env):
 
     def set_universal_arg(self, plum_pos):
         self.plum_pos = plum_pos
+
+
+
+
+
+def check_shortcut_vision(pos, angle, fov=1, num_rays=12):
+    '''Check if any vision lines would be intersecting with shortcut
+    if it was there, given a set angle and position'''
+    x3 = np.array([[125]])
+    x4 = np.array([[175]])
+    y3 = np.array([[250]])
+    y4 = np.array([[251]])
+
+    fov = 1
+    num_rays = 12
+    ray_max_len = 550
+
+    fov_start = angle - fov/2
+    fov_end = fov_start + fov
+
+    ray_angles = np.linspace(fov_start, fov_end, num_rays, endpoint=False)
+    ray_mults = np.array([np.cos(ray_angles), np.sin(ray_angles)]).T
+    ray_starts = np.full((num_rays, 2), pos)
+
+    x1 = ray_starts[:, 0].reshape(-1, 1)
+    y1 = ray_starts[:, 1].reshape(-1, 1)
+    ray_ends = ray_mults * ray_max_len + pos
+    x2 = ray_ends[:, 0].reshape(-1, 1)
+    y2 = ray_ends[:, 1].reshape(-1, 1)
+    
+    #Compute intersect metrics
+    epsilon = 1e-8
+    denom = (y4-y3)*(x2-x1) - (x4-x3)*(y2-y1) + 1e-8
+    ua = ((x4-x3)*(y1-y3) - (y4-y3)*(x1-x3)) / denom
+    ub = ((x2-x1)*(y1-y3) - (y2-y1)*(x1-x3)) / denom
+
+    #Compute x y intersects (they ARE both supposed to be ua)
+    x = x1 + ua*(x2-x1)
+    y = y1 + ua*(y2-y1)
+
+    #Compute distances to intersects
+    dists = np.sqrt((x - pos[0])**2 + (y - pos[1])**2)
+
+    #Only keep distances with valid intersects
+    mults = np.full(x.shape, 1.)
+    mults[((ua < 0) | (ua > 1) | (ub < 0) | (ub > 1))] = np.inf
+
+    #We get np.nan where lines are parallel which throws off the argmin
+    # Setting parallel to inf should fix the issue
+    dists[np.isnan(dists)] = np.inf
+    
+    return (mults*dists < np.inf).any()
