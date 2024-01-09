@@ -502,6 +502,13 @@ def get_first_shortcut_performance(t, lens, below_y=180, batch=64, ret_chk=True)
         return first
     
     
+    
+chks1 = np.arange(0, 150, 10) #0-1e6
+chks2 = np.arange(160, 300, 20) #1e6-2e6
+chks3 = np.arange(300, 600, 40) #2e6-4e6
+chks4 = np.arange(620, 930, 60) #4e6-6e6
+chk_sched = np.concatenate([chks1, chks2, chks3, chks4])
+
 def get_first_last_performing_chks(exp_format='plumtosc_sharedn_plumsched1_task{task}p{p}_t{t}',
                                    cont_format='plumtosc_sharedn_plumsched1_task{task}p{p}_cont_t{t}',
                                    formatter={'p': 0.4, 'task': 1.7, 't': 0}, verbose=False, subdir='plumtosc',
