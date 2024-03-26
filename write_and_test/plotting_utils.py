@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 
 from matplotlib.widgets import LassoSelector
 from matplotlib.path import Path
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 
 '''
 File for helping with some plotting functions
@@ -173,6 +175,19 @@ def barplot_annotate_brackets(num1, num2, data, center, height,
         
 
 
+
+def add_p_star(x, y, pvalue, ax, red=False):
+    stars = ''
+    if pvalue < 0.05:
+        stars = '*'
+    if pvalue < 0.005:
+        stars = '**'
+    if pvalue < 0.0005:
+        stars = '***'
+    
+    color = 'red' if red else 'black'
+    ax.text(x, y, stars, ha='center', color=color) 
+    
 
 
 def create_lasso_selector_plot(data):

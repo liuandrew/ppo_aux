@@ -15,6 +15,7 @@ from sklearn.metrics import silhouette_score
 from pathlib import Path
 import pandas as pd
 import scipy
+from representation_analysis import draw_character
 
 turn_speed = 0.3
 move_speed = 10
@@ -56,8 +57,14 @@ def two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None):
     
     distance_matrix = distance.cdist(X, Y, 'euclidean')
     x_ind, y_ind = linear_sum_assignment(distance_matrix)
-    wasserstein_dist = distance_matrix[x_ind, y_ind].sum()
+    dists = distance_matrix[x_ind, y_ind]
+    
+    if len(x_ind) == 0:
+        return 0.0, x_ind, y_ind, dists
+    
+    wasserstein_dist = dists.sum()
     mean_dist = wasserstein_dist / len(x_ind)
+    
     
     if all_data is not None:
         min_max = np.vstack([all_data.min(axis=0), all_data.max(axis=0)])
@@ -68,8 +75,9 @@ def two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None):
     if min_max is not None:
         L2 = np.linalg.norm(min_max[1, :] - min_max[0, :])
         mean_dist = mean_dist / L2
+        dists = dists / L2
     
-    return mean_dist, x_ind, y_ind
+    return mean_dist, x_ind, y_ind, dists
 
 
 
@@ -141,7 +149,8 @@ Plotting functions
 '''
 
 def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
-                         split_activ=False, format_ax=True):
+                         split_activ=False, format_ax=True,
+                         s=5, angle=None):
     '''
     Flexible plotting of 2d projected activations and coloring
     
@@ -151,6 +160,10 @@ def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
     pos: pass array of positions if wanting to plot these
     split_activ: if True, split each label into its on subaxes
     format_ax: whether to handle formatting as standard
+    s: plot point size
+    
+    angles: pass 1D array of angles if wanting to plot these
+        If passed, will use triangles for drawing position plots    
     '''
     num_classes = (np.unique(labels) != -1).sum()
     num_cols = 1
@@ -178,17 +191,20 @@ def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
             
     if (labels == -1).sum() > 0:
         idxs = labels == -1
-        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.01, color='gray')
+        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.01, color='gray', s=s)
     for i in range(num_classes):
         idxs = labels == i
-        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1], s=s)
         if split_activ:
-            ax[i+1].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+            ax[i+1].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1], s=s)
         if pos is not None:
-            if split_activ:
-                ax[i+1+num_classes].scatter(pos[idxs, 0], pos[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+            pax = ax[i+1+num_classes] if split_activ else ax[i+1]
+            
+            if angle is not None:
+                draw_shortcut_maze_light(ax=pax)
+                draw_char_positions(pos[idxs], angle[idxs], pax, color=rgb_colors[i+1])
             else:
-                ax[i+1].scatter(pos[idxs, 0], pos[idxs, 1], alpha=0.1, color=rgb_colors[i+1])
+                pax.scatter(pos[idxs, 0], pos[idxs, 1], alpha=0.1, color=rgb_colors[i+1], s=s)
                 
 
 def plot_two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None, one_ax=True,
@@ -202,10 +218,10 @@ def plot_two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None
     normalize, all_data, min_max: normalization options, the same as from
         two_cloud_wasserstein()
     one_ax: if True plot onto one axis, if False plot onto 3
-    colors: optionally pass list of 2 colors to color the points with
+    colors: optionally pass list of 2 colors to color the points with                  
     '''
     
-    dist, x_inds, y_inds = two_cloud_wasserstein(X, Y, normalize, all_data, min_max)
+    dist, x_inds, y_inds, dists = two_cloud_wasserstein(X, Y, normalize, all_data, min_max)
 
     if one_ax:
         fig, ax = pplt.subplots()
@@ -252,8 +268,36 @@ def draw_shortcut_maze(shortcut_open=True, ax=None):
                    wall_colors=1.5)
     env.render('human', ax=ax)
     ax.format(xlim=[0, 300], ylim=[0, 300])
+    
 
 
+def draw_shortcut_maze_light(shortcut_open=True, ax=None, wall_thickness=5, draw_goal=False):
+    '''Draw the shortcut maze manually on a light background'''
+    if ax is None:
+        fig, ax = pplt.subplots()
+        ax.format(xlim=[0, 300], ylim=[0, 300])
+        
+    rect = plt.Rectangle([50, 250-wall_thickness/2], 75, wall_thickness, fc=(0.2, 0.2, 0.2))
+    ax.add_patch(rect)
+    rect = plt.Rectangle([175, 250-wall_thickness/2], 125, wall_thickness, fc=(0.2, 0.2, 0.2))
+    ax.add_patch(rect)
+    
+    if not shortcut_open:
+        rect = plt.Rectangle([125, 250-wall_thickness/2], 50, wall_thickness, fc=(0.9, 0.4, 0.9))
+        ax.add_patch(rect)
+    if draw_goal:
+        rect = plt.Rectangle([262.5, 262.5], 25, 25, fc=(0.2, 0.7, 0.2))
+        ax.add_patch(rect)
+    
+    
+def draw_char_positions(pos, angle, ax=None, size=10, color=rgb_colors[0], alpha=0.2):
+    '''Draw character positions, used in colored_activ2d_plot'''
+    if ax is None:
+        fig, ax = pplt.subplots()
+        ax.format(xlim=[0, 300], ylim=[0, 300])
+    
+    for i in range(len(pos)):
+        draw_character(pos[i], angle[i], size, ax, color, alpha)
 
 '''
 ================================================================
@@ -488,9 +532,10 @@ def get_first_shortcut_performance(t, lens, below_y=180, batch=64, ret_chk=True)
         ret_chk: the nearest multiple-of-10 checkpoint where this occurs
         else: the actual first index
     '''
-    first = np.argmax(lens < below_y)
-    if first == 0:
+    below = np.argwhere(lens < below_y)
+    if len(below) == 0:
         return False
+    first = below.squeeze()[0]
     
     first_t = t[first]
     first_chk = first_t / (batch*100)

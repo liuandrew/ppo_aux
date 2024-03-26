@@ -6,8 +6,6 @@ import numpy as np
 import sys
 sys.path.append('../')
 from evaluation import *
-from model_evaluation import *
-from trajectories import *
 from shortcut_analysis import *
 from explore_analysis import *
 

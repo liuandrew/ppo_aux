@@ -187,7 +187,7 @@ def train_classifier(x, labels, valid_x=None, valid_labels=None, num_labels=None
     return linear, losses, accuracies, valid_accuracies
 
 
-def draw_character(pos, angle, size=10, ax=None, color=None):
+def draw_character(pos, angle, size=10, ax=None, color=None, alpha=1.):
     '''
     Given a position and angle, draw character to the given axis
     '''
@@ -200,7 +200,7 @@ def draw_character(pos, angle, size=10, ax=None, color=None):
     if color is None:
         color = np.array([0.9, 0.9, 0])
 
-    poly = plt.Polygon([point1, point2, point3], fc=color)
+    poly = plt.Polygon([point1, point2, point3], fc=color, alpha=alpha)
     if ax is None:
         plt.gca().add_patch(poly)
     else:
