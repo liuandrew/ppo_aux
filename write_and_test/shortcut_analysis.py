@@ -150,7 +150,7 @@ Plotting functions
 
 def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
                          split_activ=False, format_ax=True,
-                         s=5, angle=None):
+                         s=5, angle=None, colors=None, alpha=0.1):
     '''
     Flexible plotting of 2d projected activations and coloring
     
@@ -162,8 +162,9 @@ def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
     format_ax: whether to handle formatting as standard
     s: plot point size
     
-    angles: pass 1D array of angles if wanting to plot these
+    angle: pass 1D array of angles if wanting to plot these
         If passed, will use triangles for drawing position plots    
+    colors: pass in collection of [r, g, b] values from [0, 1] to color with
     '''
     num_classes = (np.unique(labels) != -1).sum()
     num_cols = 1
@@ -171,7 +172,8 @@ def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
         num_cols += num_classes
     if pos is not None:
         num_cols += num_classes
-    
+    if colors is None:
+        colors = rgb_colors
     
     if ax is None:
         fig, ax = pplt.subplots(ncols=num_cols, sharey=False)
@@ -194,17 +196,17 @@ def colored_activ2d_plot(activ2d, labels, pos=None, ax=None,
         ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.01, color='gray', s=s)
     for i in range(num_classes):
         idxs = labels == i
-        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1], s=s)
+        ax[0].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=alpha, color=colors[i+1], s=s)
         if split_activ:
-            ax[i+1].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=0.1, color=rgb_colors[i+1], s=s)
+            ax[i+1].scatter(activ2d[idxs, 0], activ2d[idxs, 1], alpha=alpha, color=colors[i+1], s=s)
         if pos is not None:
             pax = ax[i+1+num_classes] if split_activ else ax[i+1]
             
             if angle is not None:
                 draw_shortcut_maze_light(ax=pax)
-                draw_char_positions(pos[idxs], angle[idxs], pax, color=rgb_colors[i+1])
+                draw_char_positions(pos[idxs], angle[idxs], pax, color=colors[i+1])
             else:
-                pax.scatter(pos[idxs, 0], pos[idxs, 1], alpha=0.1, color=rgb_colors[i+1], s=s)
+                pax.scatter(pos[idxs, 0], pos[idxs, 1], alpha=alpha, color=colors[i+1], s=s)
                 
 
 def plot_two_cloud_wasserstein(X, Y, normalize=True, all_data=None, min_max=None, one_ax=True,
